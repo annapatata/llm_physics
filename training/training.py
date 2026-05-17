@@ -55,7 +55,7 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='c
     progress_bar = tqdm(range(1, total_iterations + 1), desc="Pre-training")
     
     running_loss = 0.0
-    log_interval = 500 # Print average loss every 500 steps
+    log_interval = 10 # Print average loss every 500 steps
     
     for step in progress_bar:
         batch = next(batch_iterator).to(device)
