@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
     # Use the new Infinite dataset (no total_target_tokens needed)
     dataset = InfiniteCFGDataset(my_cfg, seq_len=512)
-    dataloader = DataLoader(dataset, batch_size=32, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=12, pin_memory=True)
 
     # 3. Initialize Model
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
