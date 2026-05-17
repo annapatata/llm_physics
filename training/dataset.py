@@ -12,12 +12,15 @@ class InfiniteCFGDataset(IterableDataset):
 
     def __iter__(self):
         token_buffer = []
-
-        # This infinite loop guarantees the model NEVER sees the same string twice
+        
         while True:
-            # Generate a fresh string
-            x, _, _, _ = self.cfg.sample_string()
+            # 1. Capture the entire CFGSample object
+            sample = self.cfg.sample_string()
             
+            # 2. Extract the terminal string
+            x = sample.string 
+            
+            # Sandwich with BOS and EOS and add to the running buffer
             token_buffer.extend([BOS_TOKEN] + x + [EOS_TOKEN])
             
             while len(token_buffer) >= self.chunk_size:
