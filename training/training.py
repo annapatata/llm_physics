@@ -118,7 +118,7 @@ if __name__ == "__main__":
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
 
     # 4. Run the 1,000 step smoke test and capture the returned model
-    model = train_gpt_pretraining(model, dataloader, total_iterations=1_000, device=device)
+    model = train_gpt_pretraining(model, dataloader, total_iterations=20_000, device=device)
     
     # 5. Save the weights so they aren't deleted from memory
     torch.save(model.state_dict(), "gpt2_cfg3f_1k_smoketest.pt")
