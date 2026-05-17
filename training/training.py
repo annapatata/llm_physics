@@ -1,10 +1,24 @@
+import sys
+import os
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR
+from torch.utils.data import DataLoader  
 from tqdm import tqdm
-from grammar import load_cfg  
-from dataset import TrainingCFGDataset
+
+# Add the project root to the Python path so it can find 'cfg' and 'models'
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
+# 1. Import from the cfg folder
+from cfg.grammar import load_cfg 
+
+# 2. Import the NEW iterable dataset
+from dataset import InfiniteCFGDataset
+
+# 3. Import the model from the models folder
+from models.gpt_rot import GPT2Rotary
 
 def get_infinite_batches(dataloader):
     """Yields batches indefinitely so we can train by steps, not epochs."""
@@ -85,9 +99,8 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='c
     print("Training complete! 100,000 iterations finished.")
     return model
 
-# ==========================================
-# EXECUTION
-# ==========================================
+
+
 
 if __name__ == "__main__":
     # 1. Setup Device
@@ -95,13 +108,18 @@ if __name__ == "__main__":
     print(f"Training on: {device}")
 
     # 2. Load Grammar and Data
-    my_cfg = load_cfg('../grammars/cfg3f.txt') 
-    # For a real run, you want ~5M to 10M tokens. We use 1M here for speed.
-    dataset = TrainingCFGDataset(my_cfg, total_target_tokens=1_000_000, seq_len=512)
-    dataloader = DataLoader(dataset, batch_size=96, shuffle=True)
+    my_cfg = load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3f.txt'))
+
+    # Use the new Infinite dataset (no total_target_tokens needed)
+    dataset = InfiniteCFGDataset(my_cfg, seq_len=512)
+    dataloader = DataLoader(dataset, batch_size=96, pin_memory=True)
 
     # 3. Initialize Model
-    # Vocab size is 5 (BOS=0, Terminals={1,2,3}, EOS=4)
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
 
-    train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='cuda')
+    # 4. Run the 1,000 step smoke test and capture the returned model
+    model = train_gpt_pretraining(model, dataloader, total_iterations=1_000, device=device)
+    
+    # 5. Save the weights so they aren't deleted from memory
+    torch.save(model.state_dict(), "gpt2_cfg3f_1k_smoketest.pt")
+    print("Smoke test complete. Model saved successfully!")
