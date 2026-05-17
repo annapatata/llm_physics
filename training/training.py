@@ -94,6 +94,9 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='c
                 "Loss": f"{avg_loss:.4f}", 
                 "LR": f"{current_lr:.6f}"
             })
+            
+            print(f"Step {step}/{total_iterations} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}", flush=True)
+
             running_loss = 0.0
 
     print("Training complete! 100,000 iterations finished.")
