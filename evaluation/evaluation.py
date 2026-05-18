@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
     # Result 1 — Completion Accuracy (paper uses 20,000 samples; use fewer for quick checks)
     # c=0: full generation from scratch
-    evaluate_completion_accuracy(model, my_cfg, num_samples=20_000, prefix_len=0, device=device)
+    evaluate_completion_accuracy(model, my_cfg, num_samples=200, prefix_len=0, device=device)
 
     # c=50: completion from a 50-token prefix
-    evaluate_completion_accuracy(model, my_cfg, num_samples=20_000, prefix_len=50, device=device)
+    evaluate_completion_accuracy(model, my_cfg, num_samples=200, prefix_len=50, device=device)
