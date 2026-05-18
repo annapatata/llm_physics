@@ -30,10 +30,12 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, accumulat
         betas=(0.9, 0.98), 
         weight_decay=0.1
     )
+
+    effective_optimizer_steps = total_iterations // accumulation_steps
     
     # 2. Gentle Warmup: Start at 1% of the new, lower LR to safely rebuild Adam's momentum
-    warmup_steps = int(total_iterations * 0.05)
-    decay_steps = total_iterations - warmup_steps
+    warmup_steps = int(effective_optimizer_steps * 0.05)
+    decay_steps = effective_optimizer_steps - warmup_steps
     
     warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps)
     decay_scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=decay_steps)
@@ -94,6 +96,9 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, accumulat
                 "Loss": f"{avg_loss:.4f}", 
                 "LR": f"{current_lr:.6f}"
             })
+
+            print(f"Step {step}/{total_iterations} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}", flush=True)
+
             running_loss = 0.0
             
         # Periodic saving
@@ -128,12 +133,14 @@ if __name__ == "__main__":
     else:
         print("No previous checkpoint found. Starting training from scratch.")
 
+    final_save_path = os.path.join(project_root, "model2.pt") 
+
     # 4. Train the model (100k steps with accumulation = 1M effective forward passes)
     model = train_gpt_pretraining(
         model, 
         dataloader, 
         total_iterations=10_000, 
         accumulation_steps=8, 
-        save_path=checkpoint_path,
+        save_path=final_save_path,
         device=device
     )
