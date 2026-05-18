@@ -19,6 +19,7 @@ import numpy as np
 from dp.binarize import binarize
 
 
+
 def is_valid(x, cfg) -> bool:
     """Return True iff terminal string x ∈ L(cfg)."""
     bcfg = binarize(cfg)
@@ -83,3 +84,4 @@ def is_valid(x, cfg) -> bool:
                 dp[i_arr, i_arr + (l - 1), A_id] |= contrib
 
     return bool(dp[0, n - 1, root_id])
+
