@@ -53,38 +53,54 @@ def generate_autoregressive(model, prefix_tokens, temperature=1.0, device='cuda'
     return prefix_tokens + generated
 
 def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, device='cuda'):
-    """
-    Evaluates completion accuracy.
-    Prefix length c=0 means full generation from scratch.
-    """
     print(f"\nEvaluating Completion Accuracy (N={num_samples}, Prefix Length={prefix_len})...")
     correct_completions = 0
+    truncations = 0
     
-    for _ in tqdm(range(num_samples)):
-        # Sample a valid string to extract a guaranteed valid prefix
-        sample = cfg.sample_string()
-        full_string = sample.string
-        
+    for i in tqdm(range(num_samples)):
+        # 1. Force the grammar to give us a sequence that fits comfortably within the 512 limit
+        while True:
+            sample = cfg.sample_string()
+            full_string = sample.string
+            if len(full_string) <= 400:
+                break
+                
         cut_idx = min(prefix_len, len(full_string))
         prefix = [BOS_TOKEN] + full_string[:cut_idx]
         
-        # Generate completion
+        # 2. Generate completion
         completed_sequence = generate_autoregressive(model, prefix, device=device)
         
-        # Strip BOS and EOS for CYK validation
-        if completed_sequence[0] == BOS_TOKEN:
-            completed_sequence = completed_sequence[1:]
-        if completed_sequence[-1] == EOS_TOKEN:
-            completed_sequence = completed_sequence[:-1]
+        # 3. Diagnostic Check: Did it hit the 512 wall?
+        hit_wall = len(completed_sequence) == MODEL_MAX_SEQ_LEN
+        if hit_wall:
+            truncations += 1
             
-        # Check validity using the CYK parser
-        if is_valid(completed_sequence, cfg):
+        # Print the first 3 attempts to visually inspect what the model is outputting
+        if i < 3:
+            print(f"\n--- Debug Sample {i+1} ---")
+            print(f"Target GT Length: {len(full_string)}")
+            print(f"Generated Length: {len(completed_sequence)}")
+            print(f"Hit 512 Wall?   : {hit_wall}")
+            if hit_wall:
+                print(f"Last 10 tokens  : {completed_sequence[-10:]} (Notice no EOS token '4')")
+            print("------------------------")
+            
+        # Strip special tokens safely from anywhere in the string
+        content = [t for t in completed_sequence if t != BOS_TOKEN and t != EOS_TOKEN]
+            
+        if len(content) > 0 and is_valid(content, cfg):
             correct_completions += 1
             
     accuracy = correct_completions / num_samples
     print(f"Completion Accuracy: {accuracy * 100:.2f}% ({correct_completions}/{num_samples})")
+    
+    if truncations > 0:
+        print(f"\nWARNING: {truncations}/{num_samples} sequences hit the 512-token limit.")
+        print("If truncations are high despite filtering for GT < 400, your model has NOT grokked the grammar.")
+        print("It is babbling local patterns without closing the global brackets. You must train for more steps or use a larger batch size.")
+        
     return accuracy
-
 
 
 if __name__ == "__main__":
