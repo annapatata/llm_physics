@@ -8,7 +8,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from cfg.grammar import load_cfg
-from cfg.inside import string_prob
+from dp.inside import string_prob
 
 def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
     """
