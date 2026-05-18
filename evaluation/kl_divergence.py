@@ -145,6 +145,7 @@ def _precompute_right_matrix(bcfg: BinarizedCFG, nt_idx: dict, nt_list: list):
     Since the grammar is acyclic (hierarchical levels), (I−W) is non-singular
     (unit lower-triangular in topological order, det = 1).
     """
+    
     N = len(nt_list)
     W = np.zeros((N, N), dtype=np.float64)
     for A, B, C, p in bcfg.binary_rules:

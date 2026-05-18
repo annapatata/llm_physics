@@ -16,31 +16,40 @@ from models.gpt_rot import GPT2Rotary
 BOS_TOKEN = 0
 EOS_TOKEN = 4
 
+MODEL_MAX_SEQ_LEN = 512  # must match RoPEAttention(max_seq_len=...) in gpt_rot.py
+CFG_MAX_STRING_LEN = 729  # 3^6, theoretical maximum for these CFGs
+
 @torch.no_grad()
-def generate_autoregressive(model, prefix_tokens, max_new_tokens=256, temperature=1.0, device='cuda'):
+def generate_autoregressive(model, prefix_tokens, temperature=1.0, device='cuda'):
     """
     Generates a sequence autoregressively using multinomial sampling.
     Temperature τ=1.0 is used (per the paper) to avoid greedy decoding.
+
+    max_new_tokens is derived from the model's context window so that idx
+    never exceeds MODEL_MAX_SEQ_LEN, preventing RoPE/mask buffer overflow.
+    The CFG can produce strings up to 729 tokens; 256 would silently truncate
+    them and cause valid long strings to fail the CYK check.
     """
     model.eval()
     idx = torch.tensor(prefix_tokens, dtype=torch.long, device=device).unsqueeze(0)
-    
+
+    # Budget: how many new tokens fit before hitting the context-window ceiling
+    max_new_tokens = MODEL_MAX_SEQ_LEN - len(prefix_tokens)
+
     generated = []
     for _ in range(max_new_tokens):
         logits = model(idx)
-        # Scale by temperature and isolate the final token's logits
         next_token_logits = logits[:, -1, :] / temperature
         probs = F.softmax(next_token_logits, dim=-1)
-        
-        # Multinomial sampling
+
         next_token = torch.multinomial(probs, num_samples=1)
         generated.append(next_token.item())
-        
+
         if next_token.item() == EOS_TOKEN:
             break
-            
+
         idx = torch.cat((idx, next_token), dim=1)
-        
+
     return prefix_tokens + generated
 
 def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, device='cuda'):
@@ -99,9 +108,9 @@ if __name__ == "__main__":
         
     model.to(device)
 
-    #4. Accuracy Evaluation
+    # Result 1 — Completion Accuracy (paper uses 20,000 samples; use fewer for quick checks)
+    # c=0: full generation from scratch
+    evaluate_completion_accuracy(model, my_cfg, num_samples=20_000, prefix_len=0, device=device)
 
-    evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=0, device=device)
-        
-    # Completion from prefix (prefix c=50)
-    evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=50, device=device)
+    # c=50: completion from a 50-token prefix
+    evaluate_completion_accuracy(model, my_cfg, num_samples=20_000, prefix_len=50, device=device)
