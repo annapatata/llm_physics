@@ -8,7 +8,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from cfg.grammar import load_cfg
-from dp.inside import string_prob
+from dp.inside import string_prob_gpu 
 
 def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
     """
@@ -36,7 +36,7 @@ def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
             
         # 2. Compute the exact marginal probability P(x) using the Inside algorithm
         # Note: string_prob computes the probability under uniform rule choices.
-        p_x = string_prob(x, cfg)
+        p_x = string_prob_gpu(x, cfg)
         
         if p_x <= 0.0:
             # This should theoretically never happen for a sampled string, 
