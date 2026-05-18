@@ -2,6 +2,7 @@ import os
 import math
 import numpy as np
 from tqdm import tqdm
+import sys
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
@@ -9,7 +10,7 @@ sys.path.append(project_root)
 from cfg.grammar import load_cfg
 from cfg.inside import string_prob
 
-def estimate_cfg_entropy(num_samples=1000, max_len=512):
+def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
     """
     Estimates the per-token entropy (in nats) of a Context-Free Grammar.
     This value represents the absolute theoretical minimum loss your model can achieve.
@@ -71,7 +72,7 @@ def estimate_cfg_entropy(num_samples=1000, max_len=512):
 
 if __name__ == "__main__":
     # Adjust the path to where your cfg3f.txt is located
-    cfg_file_path = os.path.join(os.path.dirname(project_root, 'cfg', 'grammars', 'cfg3f.txt')
+    cfg_file_path = os.path.join(os.path.dirname(project_root, 'cfg', 'grammars', 'cfg3f.txt'))
     
     if not os.path.exists(cfg_file_path):
         # Fallback if running from a different directory
