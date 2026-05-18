@@ -10,7 +10,7 @@ sys.path.append(project_root)
 
 # Adjust these imports if your folder structure differs
 from cfg.grammar import load_cfg
-from dp.cyk import is_valid_gpu
+from dp.cyk import is_valid
 from models.gpt_rot import GPT2Rotary
 
 BOS_TOKEN = 0
@@ -69,7 +69,7 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
             completed_sequence = completed_sequence[:-1]
             
         # Check validity using the CYK parser
-        if is_valid_gpu(completed_sequence, cfg):
+        if is_valid(completed_sequence, cfg):
             correct_completions += 1
             
     accuracy = correct_completions / num_samples
