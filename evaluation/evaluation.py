@@ -99,7 +99,9 @@ if __name__ == "__main__":
         
     model.to(device)
 
-evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=0, device=device)
-    
-# Completion from prefix (prefix c=50)
-evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=50, device=device)
+    #4. Accuracy Evaluation
+
+    evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=0, device=device)
+        
+    # Completion from prefix (prefix c=50)
+    evaluate_completion_accuracy(model, my_cfg, num_samples=2000, prefix_len=50, device=device)
