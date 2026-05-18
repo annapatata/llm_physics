@@ -15,7 +15,7 @@ is ~10^{-50} to 10^{-120}, comfortably within float64 range (~2e-308). No scalin
 from collections import defaultdict
 
 import numpy as np
-
+import torch
 from dp.binarize import binarize
 
 
@@ -81,3 +81,70 @@ def string_prob(x, cfg) -> float:
             alpha[i_arr, i_arr + (l - 1), A_id] += sum_splits[:, rule_idxs].sum(axis=1)
 
     return float(alpha[0, n - 1, root_id])
+
+
+def string_prob_gpu(x, cfg, device='cuda') -> float:
+    bcfg = binarize(cfg)
+    n = len(x)
+
+    nt_list = sorted(bcfg.all_nts)
+    nt_idx = {nt: i for i, nt in enumerate(nt_list)}
+    N = len(nt_list)
+    root_id = nt_idx[bcfg.root]
+
+    # Pre-allocate rule arrays on the GPU
+    A_ids = torch.tensor([nt_idx[A] for A, B, C, _ in bcfg.binary_rules], device=device, dtype=torch.long)
+    B_ids = torch.tensor([nt_idx[B] for A, B, C, _ in bcfg.binary_rules], device=device, dtype=torch.long)
+    C_ids = torch.tensor([nt_idx[C] for A, B, C, _ in bcfg.binary_rules], device=device, dtype=torch.long)
+    
+    # Must use float64 to prevent severe underflow on long sequences
+    probs = torch.tensor([p for _, _, _, p in bcfg.binary_rules], device=device, dtype=torch.float64)
+
+    # Group rule positions by LHS NT
+    rules_by_A = {}
+    tmp = defaultdict(list)
+    for r, a in enumerate(A_ids.cpu().numpy()):
+        tmp[int(a)].append(r)
+    for a, rs in tmp.items():
+        rules_by_A[a] = torch.tensor(rs, device=device, dtype=torch.long)
+
+    # Initialize DP table on GPU
+    alpha = torch.zeros((n, n, N), dtype=torch.float64, device=device)
+    x_arr = torch.tensor(x, device=device, dtype=torch.long)
+
+    # Base case: preterminals
+    for t, pt in bcfg.preterminals.items():
+        pos = torch.where(x_arr == t)[0]
+        if pos.numel() > 0:
+            alpha[pos, pos, nt_idx[pt]] = 1.0
+
+    i_base = torch.arange(n, device=device)
+
+    for l in range(2, n + 1):
+        n_spans = n - l + 1
+        i_arr = i_base[:n_spans]
+
+        # Meshgrid for batched split offsets
+        D_arange = torch.arange(l - 1, device=device)
+        I, D = torch.meshgrid(i_arr, D_arange, indexing="ij")
+        K = I + D
+        J = I + (l - 1)
+
+        left = alpha[I, K]       
+        right = alpha[K + 1, J]  
+
+        # Fetch probabilities for all rules
+        left_B = left[:, :, B_ids]    
+        right_C = right[:, :, C_ids]  
+        
+        # Element-wise multiplication, broadcasting rule probabilities
+        weighted = left_B * right_C * probs
+
+        # Sum over splits (dim 1 corresponds to the l-1 splits)
+        sum_splits = weighted.sum(dim=1)
+
+        # Scatter into alpha
+        for A_id, rule_idxs in rules_by_A.items():
+            alpha[i_arr, i_arr + (l - 1), A_id] += sum_splits[:, rule_idxs].sum(dim=1)
+
+    return float(alpha[0, n - 1, root_id].cpu())
