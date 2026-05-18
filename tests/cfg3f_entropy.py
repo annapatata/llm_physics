@@ -72,7 +72,7 @@ def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
 
 if __name__ == "__main__":
     # Adjust the path to where your cfg3f.txt is located
-    cfg_file_path = os.path.join(os.path.dirname(project_root, 'cfg', 'grammars', 'cfg3f.txt'))
+    cfg_file_path = os.path.join(project_root, 'cfg', 'grammars', 'cfg3f.txt')
     
     if not os.path.exists(cfg_file_path):
         # Fallback if running from a different directory
