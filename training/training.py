@@ -26,7 +26,7 @@ def get_infinite_batches(dataloader):
         for batch in dataloader:
             yield batch
 
-def train_gpt_pretraining(model, dataloader, total_iterations=100_000, accumulation_steps=8, device='cuda'):
+def train_gpt_pretraining(model, dataloader, total_iterations=10_000, accumulation_steps=8, device='cuda'):
     model.to(device)
     
     # 1. Optimizer strictly following paper's hyperparameters
@@ -42,7 +42,7 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, accumulat
     scheduler = LinearLR(
         optimizer, 
         start_factor=1.0, 
-        end_factor=0.0, 
+        end_factor=0.9, 
         total_iters=total_iterations
     )
     
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     model = train_gpt_pretraining(
         model, 
         dataloader, 
-        total_iterations=100_000, 
+        total_iterations=10_000, 
         accumulation_steps=accumulation_steps, 
         device=device
     )
