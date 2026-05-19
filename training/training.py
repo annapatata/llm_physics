@@ -26,7 +26,7 @@ def get_infinite_batches(dataloader):
         for batch in dataloader:
             yield batch
 
-def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='cuda'):
+def train_gpt_pretraining(model, dataloader, total_iterations=100_000, accumulation_steps=8, device='cuda'):
     model.to(device)
     
     # 1. Optimizer strictly following paper's hyperparameters
@@ -51,39 +51,49 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='c
     
     model.train()
     
-    # Setup tqdm for 100,000 steps
+    # Setup tqdm for 100,000 optimization steps
     progress_bar = tqdm(range(1, total_iterations + 1), desc="Pre-training")
     
     running_loss = 0.0
-    log_interval = 10 # Print average loss every 500 steps
+    log_interval = 10 # Print average loss every 10 steps
     
+    optimizer.zero_grad()
+
     for step in progress_bar:
-        batch = next(batch_iterator).to(device)
+        step_loss = 0.0
         
-        # Slicing for Next-Token Prediction
-        inputs = batch[:, :-1]
-        targets = batch[:, 1:]
-        
-        optimizer.zero_grad()
-        
-        # Forward Pass
-        logits = model(inputs)
-        
-        # Reshape for CrossEntropyLoss
-        logits_flat = logits.reshape(-1, logits.size(-1))
-        targets_flat = targets.reshape(-1)
-        
-        # Calculate Loss
-        loss = loss_fn(logits_flat, targets_flat)
-        
-        # Backward Pass
-        loss.backward()
-        
-        # Update weights and learning rate
+        # Gradient Accumulation Loop
+        for _ in range(accumulation_steps):
+            batch = next(batch_iterator).to(device)
+            
+            # Slicing for Next-Token Prediction
+            inputs = batch[:, :-1]
+            targets = batch[:, 1:]
+            
+            # Forward Pass
+            logits = model(inputs)
+            
+            # Reshape for CrossEntropyLoss
+            logits_flat = logits.reshape(-1, logits.size(-1))
+            targets_flat = targets.reshape(-1)
+            
+            # Calculate Loss
+            loss = loss_fn(logits_flat, targets_flat)
+            
+            # Scale loss to normalize gradients across the accumulation steps
+            scaled_loss = loss / accumulation_steps
+            
+            # Backward Pass (accumulates gradients)
+            scaled_loss.backward()
+            
+            step_loss += scaled_loss.item()
+            
+        # Update weights and learning rate after accumulating gradients
         optimizer.step()
         scheduler.step()
+        optimizer.zero_grad()
         
-        running_loss += loss.item()
+        running_loss += step_loss
         
         # Logging & Progress Bar Updates
         if step % log_interval == 0:
@@ -99,11 +109,19 @@ def train_gpt_pretraining(model, dataloader, total_iterations=100_000, device='c
 
             running_loss = 0.0
 
+        # Checkpointing every 10,000 steps
+        if step % 10_000 == 0:
+            checkpoint_path = f"gpt_checkpoint_step_{step}.pt"
+            torch.save({
+                'step': step,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+            }, checkpoint_path)
+            print(f"\n[Checkpoint] Saved to {checkpoint_path}")
+
     print("Training complete! 100,000 iterations finished.")
     return model
-
-
-
 
 if __name__ == "__main__":
     # 1. Setup Device
@@ -111,18 +129,29 @@ if __name__ == "__main__":
     print(f"Training on: {device}")
 
     # 2. Load Grammar and Data
-    my_cfg = load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3f.txt'))
+    my_cfg = load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3b.txt'))
 
     # Use the new Infinite dataset (no total_target_tokens needed)
     dataset = InfiniteCFGDataset(my_cfg, seq_len=512)
-    dataloader = DataLoader(dataset, batch_size=12, pin_memory=True)
+    
+    # Micro-batch size is 12. 
+    # To get effective batch size 96: 96 / 12 = 8 accumulation steps.
+    micro_batch_size = 12
+    accumulation_steps = 8
+    dataloader = DataLoader(dataset, batch_size=micro_batch_size, pin_memory=True)
 
     # 3. Initialize Model
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
 
     # 4. Run the 1,000 step smoke test and capture the returned model
-    model = train_gpt_pretraining(model, dataloader, total_iterations=20_000, device=device)
+    model = train_gpt_pretraining(
+        model, 
+        dataloader, 
+        total_iterations=100_000, 
+        accumulation_steps=accumulation_steps, 
+        device=device
+    )
     
     # 5. Save the weights so they aren't deleted from memory
-    torch.save(model.state_dict(), "gpt2_cfg3f_1k_smoketest.pt")
-    print("Smoke test complete. Model saved successfully!")
+    torch.save(model.state_dict(), "model_final.pt")
+    print("Final model saved successfully!")

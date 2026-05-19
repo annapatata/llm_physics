@@ -18,7 +18,7 @@ def estimate_cfg_entropy(cfg_path, num_samples=1000, max_len=512):
 
     print(f"Loading grammar from {cfg_path}...")
 
-    cfg= load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3f.txt'))
+    cfg= load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3b.txt'))
     
     total_entropy_rate = 0.0
     valid_samples = 0

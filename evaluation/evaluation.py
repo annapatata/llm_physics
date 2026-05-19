@@ -42,7 +42,7 @@ def generate_autoregressive(model, prefix_tokens, temperature=1.0, device='cuda'
         next_token_logits = logits[:, -1, :] / temperature
         probs = F.softmax(next_token_logits, dim=-1)
 
-        next_token = torch.argmax(probs)
+        next_token = torch.multinomial(probs, num_samples=1)
         generated.append(next_token.item())
 
         if next_token.item() == EOS_TOKEN:
@@ -60,9 +60,12 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
     for i in tqdm(range(num_samples)):
         # 1. Force the grammar to give us a sequence that fits comfortably within the 512 limit
         
-        sample = cfg.sample_string()
-        full_string = sample.string
-        
+        while True:
+            sample = cfg.sample_string()
+            full_string = sample.string
+            if len(full_string) <= (MODEL_MAX_SEQ_LEN - 2): 
+                break 
+
         cut_idx = min(prefix_len, len(full_string))
         prefix = [BOS_TOKEN] + full_string[:cut_idx]
         
@@ -106,21 +109,24 @@ if __name__ == "__main__":
     print(f"Running evaluation on {device}")
     
     # 1. Initialize CFG
-    cfg_path = os.path.join(project_root, 'cfg', 'grammars', 'cfg3f.txt')
+    cfg_path = os.path.join(project_root, 'cfg', 'grammars', 'cfg3b.txt')
     my_cfg = load_cfg(cfg_path)
     
     # 2. Initialize Model (ensure vocab_size matches training: 5)
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
     
     # 3. Load Weights
-    weights_path = os.path.join(project_root, 'model.pt')
+    weights_path = os.path.join(project_root, 'model.pt') # Or gpt_checkpoint_step_100000.pt
     if os.path.exists(weights_path):
-        model.load_state_dict(torch.load(weights_path, map_location=device))
-        print("Model weights loaded successfully.")
-    else:
-        print(f"Warning: Weights not found at {weights_path}. Evaluating UNTRAINED model.")
+        checkpoint = torch.load(weights_path, map_location=device)
         
-    model.to(device)
+        # Handle both raw state_dict and checkpoint dictionary formats
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+            
+        print("Model weights loaded successfully.")
 
     # Result 1 — Completion Accuracy (paper uses 20,000 samples; use fewer for quick checks)
     # c=0: full generation from scratch

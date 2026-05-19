@@ -471,7 +471,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="KL divergence evaluation (Result 3)")
     parser.add_argument("--checkpoint", required=True, help="Path to GPT_rot .pt checkpoint")
-    parser.add_argument("--cfg",        default="cfg/grammars/cfg3f.txt")
+    parser.add_argument("--cfg",        default="cfg/grammars/cfg3b.txt")
     parser.add_argument("--n_strings",  type=int, default=200)
     parser.add_argument("--max_len",    type=int, default=400)
     parser.add_argument("--device",     default="cuda" if torch.cuda.is_available() else "cpu")
