@@ -42,7 +42,7 @@ def generate_autoregressive(model, prefix_tokens, temperature=1.0, device='cuda'
         next_token_logits = logits[:, -1, :] / temperature
         probs = F.softmax(next_token_logits, dim=-1)
 
-        next_token = torch.multinomial(probs, num_samples=1)
+        next_token = torch.argmax(probs, num_samples=1)
         generated.append(next_token.item())
 
         if next_token.item() == EOS_TOKEN:
