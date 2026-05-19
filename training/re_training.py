@@ -84,6 +84,8 @@ def train_gpt_pretraining(
             avg_loss = running_loss / 100
             current_lr = optimizer.param_groups[0]['lr']
             progress_bar.set_postfix({"Loss": f"{avg_loss:.4f}", "LR": f"{current_lr:.8f}"})
+            print(f"Step {step}/{total_iterations} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}", flush=True)
+
             running_loss = 0.0
 
         # Periodic full state save
