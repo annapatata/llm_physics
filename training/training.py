@@ -110,7 +110,7 @@ def train_gpt_pretraining(model, dataloader, total_iterations=10_000, accumulati
             running_loss = 0.0
 
         # Checkpointing every 10,000 steps
-        if step % 10_000 == 0:
+        if step % 2_000 == 0:
             checkpoint_path = f"gpt_checkpoint_step_{step}.pt"
             torch.save({
                 'step': step,
