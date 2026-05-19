@@ -42,7 +42,7 @@ def train_gpt_pretraining(model, dataloader, total_iterations=10_000, accumulati
     scheduler = LinearLR(
         optimizer, 
         start_factor=1.0, 
-        end_factor=0.9, 
+        end_factor=0.0, 
         total_iters=total_iterations
     )
     
@@ -120,7 +120,7 @@ def train_gpt_pretraining(model, dataloader, total_iterations=10_000, accumulati
             }, checkpoint_path)
             print(f"\n[Checkpoint] Saved to {checkpoint_path}")
 
-    print("Training complete! 100,000 iterations finished.")
+    print(f"Training complete! {total_iterations} iterations finished.")
     return model
 
 if __name__ == "__main__":
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     model = train_gpt_pretraining(
         model, 
         dataloader, 
-        total_iterations=10_000, 
+        total_iterations=2_034, 
         accumulation_steps=accumulation_steps, 
         device=device
     )
