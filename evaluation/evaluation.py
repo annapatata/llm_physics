@@ -62,7 +62,7 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
         while True:
             sample = cfg.sample_string()
             full_string = sample.string
-            if len(full_string) <= 400:
+            if len(full_string) <= 100:
                 break
                 
         cut_idx = min(prefix_len, len(full_string))
