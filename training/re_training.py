@@ -112,7 +112,7 @@ if __name__ == "__main__":
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
     
     full_checkpoint_path = os.path.join(project_root, "full_checkpoint.pt")
-    best_weights_path = os.path.join(project_root, "model2.pt")
+    best_weights_path = os.path.join(project_root, "model.pt")
     
     # 4. Initialization Routing
     if not os.path.exists(full_checkpoint_path):
