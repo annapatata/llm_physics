@@ -97,7 +97,7 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
     
     if truncations > 0:
         print(f"\nWARNING: {truncations}/{num_samples} sequences hit the 512-token limit.")
-        print("If truncations are high despite filtering for GT < 400, your model has NOT grokked the grammar.")
+        print("If truncations are high despite filtering for GT < 100, your model has NOT grokked the grammar.")
         print("It is babbling local patterns without closing the global brackets. You must train for more steps or use a larger batch size.")
         
     return accuracy
