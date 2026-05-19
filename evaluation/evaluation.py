@@ -59,12 +59,10 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
     
     for i in tqdm(range(num_samples)):
         # 1. Force the grammar to give us a sequence that fits comfortably within the 512 limit
-        while True:
-            sample = cfg.sample_string()
-            full_string = sample.string
-            if len(full_string) <= 100:
-                break
-                
+        
+        sample = cfg.sample_string()
+        full_string = sample.string
+        
         cut_idx = min(prefix_len, len(full_string))
         prefix = [BOS_TOKEN] + full_string[:cut_idx]
         
