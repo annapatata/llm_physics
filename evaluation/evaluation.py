@@ -116,7 +116,8 @@ if __name__ == "__main__":
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
 
     # 3. Load Weights
-    weights_path = os.path.join(project_root, 'model.pt') # Or gpt_checkpoint_step_100000.pt
+    # weights_path = os.path.join(project_root, 'gpt_checkpoint_step_6500.pt')  # local
+    weights_path = '/kaggle/input/model4k/gpt_weights_6500.pt'  # Kaggle
     if os.path.exists(weights_path):
         checkpoint = torch.load(weights_path, map_location=device)
 
