@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     # 3. Load Weights
     # weights_path = os.path.join(project_root, 'gpt_checkpoint_step_6500.pt')  # local
-    weights_path = '/kaggle/input/model4k/gpt_weights_6500.pt'  # Kaggle
+    weights_path = '/kaggle/input/datasets/periclesalexiou/model4k/gpt_weights_6500.pt'  # Kaggle
     if os.path.exists(weights_path):
         checkpoint = torch.load(weights_path, map_location=device)
 
