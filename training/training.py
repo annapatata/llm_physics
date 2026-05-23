@@ -147,7 +147,7 @@ if __name__ == "__main__":
     model = train_gpt_pretraining(
         model, 
         dataloader, 
-        total_iterations=2_034, 
+        total_iterations=2_034*5, 
         accumulation_steps=accumulation_steps, 
         device=device
     )

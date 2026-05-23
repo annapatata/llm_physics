@@ -387,6 +387,10 @@ def run_probing_experiment(
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
     if not random_gpt:
         state = torch.load(gpt_checkpoint_path, map_location='cpu')
+        # Support both raw state_dicts and training checkpoints
+        # (training checkpoints wrap the model weights under 'model_state_dict')
+        if 'model_state_dict' in state:
+            state = state['model_state_dict']
         model.load_state_dict(state)
         print(f"Loaded GPT weights from {gpt_checkpoint_path}")
     else:
@@ -469,7 +473,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Probing experiment (Results 4-5)")
     parser.add_argument("--checkpoint", required=True,
                         help="Path to GPT_rot .pt checkpoint")
-    parser.add_argument("--cfg", default="cfg/grammars/cfg3f.txt",
+    parser.add_argument("--cfg", default="cfg/grammars/cfg3b.txt",
                         help="Path to grammar file (relative to project root)")
     parser.add_argument("--levels", nargs="+", type=int, default=[2, 3, 4, 5, 6])
     parser.add_argument("--n_iters", type=int, default=30_000,
