@@ -51,7 +51,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from cfg.grammar import load_cfg, CFG, CFGSample
-from models.gpt_rot import GPT2Rotary
+from models import build_model, load_model_weights, available_models
 
 BOS_TOKEN = 0
 EOS_TOKEN = 4
@@ -435,6 +435,7 @@ def print_summary(stats: AttentionStats, max_p_print: int = 16) -> None:
 def run_attention_experiment(
     gpt_checkpoint_path: Optional[str],
     cfg_path: str,
+    model_name: str = 'gpt_rot',
     n_strings_bias: int = 200,
     n_strings_residual: int = 200,
     batch_size: int = 2,
@@ -451,12 +452,11 @@ def run_attention_experiment(
     """
     cfg = load_cfg(cfg_path)
 
-    model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
+    model = build_model(model_name)
     if not random_gpt:
-        assert gpt_checkpoint_path is not None, "Provide --checkpoint or pass --random_gpt"
-        state = torch.load(gpt_checkpoint_path, map_location='cpu')
-        model.load_state_dict(state)
-        print(f"Loaded GPT_rot weights from {gpt_checkpoint_path}")
+        assert gpt_checkpoint_path is not None, "Provide --model_weights or pass --random_gpt"
+        load_model_weights(model, gpt_checkpoint_path)
+        print(f"Loaded {model_name} weights from {gpt_checkpoint_path}")
     else:
         print("GPT_rand control: using RANDOM untrained weights "
               "(B residuals should be near zero / unstructured).")
@@ -497,10 +497,13 @@ def run_attention_experiment(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Attention analysis (Results 6-9)")
-    parser.add_argument("--checkpoint", default=None,
-                        help="Path to GPT_rot .pt checkpoint (omit with --random_gpt)")
-    parser.add_argument("--cfg", default="cfg/grammars/cfg3f.txt",
-                        help="Grammar file path (relative to project root)")
+    grammars_dir = os.path.join(project_root, 'cfg', 'grammars')
+    available = [f.replace('.txt', '') for f in os.listdir(grammars_dir) if f.endswith('.txt')]
+    parser.add_argument("--model", required=True, choices=available_models(),
+                        help=f"Model architecture. Available: {', '.join(sorted(available_models()))}")
+    parser.add_argument("--model_weights", required=True, help="Path to .pt model weights file")
+    parser.add_argument("--cfg", required=True, choices=available,
+                        help=f"Grammar to use. Available: {', '.join(sorted(available))}")
     parser.add_argument("--n_strings_bias", type=int, default=200,
                         help="# strings for the position-bias pass")
     parser.add_argument("--n_strings_residual", type=int, default=200,
@@ -515,12 +518,12 @@ if __name__ == "__main__":
                         help="Optional path to save AttentionStats as a .pt file")
     args = parser.parse_args()
 
-    cfg_path = (args.cfg if os.path.isabs(args.cfg)
-                else os.path.join(project_root, args.cfg))
+    cfg_path = os.path.join(grammars_dir, f'{args.cfg}.txt')
 
     run_attention_experiment(
-        gpt_checkpoint_path=args.checkpoint,
+        gpt_checkpoint_path=args.model_weights,
         cfg_path=cfg_path,
+        model_name=args.model,
         n_strings_bias=args.n_strings_bias,
         n_strings_residual=args.n_strings_residual,
         batch_size=args.batch_size,

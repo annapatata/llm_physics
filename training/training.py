@@ -1,157 +1,142 @@
 import sys
 import os
+import json
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader  
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Add the project root to the Python path so it can find 'cfg' and 'models'
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-# 1. Import from the cfg folder
-from cfg.grammar import load_cfg 
-
-# 2. Import the NEW iterable dataset
+from cfg.grammar import load_cfg
 from dataset import InfiniteCFGDataset
+from models import build_model, load_model_weights, available_models
 
-# 3. Import the model from the models folder
-from models.gpt_rot import GPT2Rotary
+CHECKPOINTS_DIR = "checkpoints"
+
+
+def save_checkpoint(model, optimizer, scheduler, step, output_name):
+    os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+    tracker_path = os.path.join(CHECKPOINTS_DIR, "last_checkpoint.json")
+
+    # Delete previous checkpoint
+    if os.path.exists(tracker_path):
+        with open(tracker_path) as f:
+            prev = json.load(f).get("last_checkpoint")
+        if prev and os.path.exists(prev):
+            os.remove(prev)
+
+    checkpoint_path = os.path.join(CHECKPOINTS_DIR, f"{output_name}_checkpoint_{step}.pt")
+    torch.save({
+        'step': step,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+    }, checkpoint_path)
+
+    with open(tracker_path, 'w') as f:
+        json.dump({"last_checkpoint": checkpoint_path}, f, indent=2)
+
+    print(f"\n[Checkpoint] Saved to {checkpoint_path}")
+
 
 def get_infinite_batches(dataloader):
-    """Yields batches indefinitely so we can train by steps, not epochs."""
     while True:
         for batch in dataloader:
             yield batch
 
-def train_gpt_pretraining(model, dataloader, total_iterations=10_000, accumulation_steps=8, device='cuda'):
+
+def train_gpt_pretraining(model, dataloader, output_name, total_iterations=10_000, accumulation_steps=8, device='cuda'):
     model.to(device)
-    
-    # 1. Optimizer strictly following paper's hyperparameters
-    optimizer = AdamW(
-        model.parameters(), 
-        lr=0.0003, 
-        betas=(0.9, 0.98), 
-        weight_decay=0.1
-    )
-    
-    # 2. Linear Learning Rate Decay 
-    # Starts at 1.0 * lr (0.0003) and decays linearly to 0.0 * lr over total_iters
-    scheduler = LinearLR(
-        optimizer, 
-        start_factor=1.0, 
-        end_factor=0.0, 
-        total_iters=total_iterations
-    )
-    
+
+    optimizer = AdamW(model.parameters(), lr=0.0003, betas=(0.9, 0.98), weight_decay=0.1)
+    scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=total_iterations)
+
     loss_fn = nn.CrossEntropyLoss()
     batch_iterator = get_infinite_batches(dataloader)
-    
+
     model.train()
-    
-    # Setup tqdm for 100,000 optimization steps
     progress_bar = tqdm(range(1, total_iterations + 1), desc="Pre-training")
-    
     running_loss = 0.0
-    log_interval = 10 # Print average loss every 10 steps
-    
+    log_interval = 10
+
     optimizer.zero_grad()
 
     for step in progress_bar:
         step_loss = 0.0
-        
-        # Gradient Accumulation Loop
+
         for _ in range(accumulation_steps):
             batch = next(batch_iterator).to(device)
-            
-            # Slicing for Next-Token Prediction
             inputs = batch[:, :-1]
             targets = batch[:, 1:]
-            
-            # Forward Pass
             logits = model(inputs)
-            
-            # Reshape for CrossEntropyLoss
-            logits_flat = logits.reshape(-1, logits.size(-1))
-            targets_flat = targets.reshape(-1)
-            
-            # Calculate Loss
-            loss = loss_fn(logits_flat, targets_flat)
-            
-            # Scale loss to normalize gradients across the accumulation steps
+            loss = loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
             scaled_loss = loss / accumulation_steps
-            
-            # Backward Pass (accumulates gradients)
             scaled_loss.backward()
-            
             step_loss += scaled_loss.item()
-            
-        # Update weights and learning rate after accumulating gradients
+
         optimizer.step()
         scheduler.step()
         optimizer.zero_grad()
-        
+
         running_loss += step_loss
-        
-        # Logging & Progress Bar Updates
+
         if step % log_interval == 0:
             avg_loss = running_loss / log_interval
             current_lr = scheduler.get_last_lr()[0]
-            
-            progress_bar.set_postfix({
-                "Loss": f"{avg_loss:.4f}", 
-                "LR": f"{current_lr:.6f}"
-            })
-            
+            progress_bar.set_postfix({"Loss": f"{avg_loss:.4f}", "LR": f"{current_lr:.6f}"})
             print(f"Step {step}/{total_iterations} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}", flush=True)
-
             running_loss = 0.0
 
-        # Checkpointing every 10,000 steps
         if step % 500 == 0:
-            checkpoint_path = f"gpt_checkpoint_step_{step}.pt"
-            torch.save({
-                'step': step,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-            }, checkpoint_path)
-            print(f"\n[Checkpoint] Saved to {checkpoint_path}")
+            save_checkpoint(model, optimizer, scheduler, step, output_name)
 
     print(f"Training complete! {total_iterations} iterations finished.")
     return model
 
+
 if __name__ == "__main__":
-    # 1. Setup Device
+    import argparse
+
+    parser = argparse.ArgumentParser(description="GPT CFG Pretraining")
+    grammars_dir = os.path.join(project_root, 'cfg', 'grammars')
+    available_grammars = [f.replace('.txt', '') for f in os.listdir(grammars_dir) if f.endswith('.txt')]
+    parser.add_argument("--model", required=True, choices=available_models(),
+                        help=f"Model architecture. Available: {', '.join(sorted(available_models()))}")
+    parser.add_argument("--model_weights", default=None,
+                        help="Path to .pt weights file to resume training from (optional)")
+    parser.add_argument("--n_iters", type=int, default=6_500, help="Number of training iterations")
+    parser.add_argument("--output", default="my_model", help="Base name for checkpoint and final weights files")
+    parser.add_argument("--cfg", required=True, choices=available_grammars,
+                        help=f"Grammar to use. Available: {', '.join(sorted(available_grammars))}")
+    args = parser.parse_args()
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Training on: {device}")
 
-    # 2. Load Grammar and Data
-    my_cfg = load_cfg(os.path.join(project_root, 'cfg', 'grammars', 'cfg3b.txt'))
+    cfg_path = os.path.join(grammars_dir, f'{args.cfg}.txt')
+    my_cfg = load_cfg(cfg_path)
 
-    # Use the new Infinite dataset (no total_target_tokens needed)
     dataset = InfiniteCFGDataset(my_cfg, seq_len=512)
-    
-    # Micro-batch size is 12. 
-    # To get effective batch size 96: 96 / 12 = 8 accumulation steps.
-    micro_batch_size = 12
-    accumulation_steps = 8
-    dataloader = DataLoader(dataset, batch_size=micro_batch_size, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=12, pin_memory=True)
 
-    # 3. Initialize Model
-    model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
+    model = build_model(args.model)
+    if args.model_weights is not None:
+        load_model_weights(model, args.model_weights)
+        print(f"Loaded weights from {args.model_weights}")
 
-    # 4. Run the 1,000 step smoke test and capture the returned model
     model = train_gpt_pretraining(
-        model, 
-        dataloader, 
-        total_iterations=2_034*5, 
-        accumulation_steps=accumulation_steps, 
-        device=device
+        model,
+        dataloader,
+        output_name=args.output,
+        total_iterations=args.n_iters,
+        accumulation_steps=8,
+        device=device,
     )
-    
-    # 5. Save the weights so they aren't deleted from memory
-    torch.save(model.state_dict(), "model_final.pt")
-    print("Final model saved successfully!")
+
+    final_path = f"{args.output}_weights.pt"
+    torch.save(model.state_dict(), final_path)
+    print(f"Final model saved to {final_path}")

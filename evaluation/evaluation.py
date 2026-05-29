@@ -11,7 +11,7 @@ sys.path.append(project_root)
 # Adjust these imports if your folder structure differs
 from cfg.grammar import load_cfg
 from dp.cyk import is_valid
-from models.gpt_rot import GPT2Rotary
+from models import build_model, load_model_weights, available_models
 
 BOS_TOKEN = 0
 EOS_TOKEN = 4
@@ -105,38 +105,29 @@ def evaluate_completion_accuracy(model, cfg, num_samples=100, prefix_len=50, dev
 
 
 if __name__ == "__main__":
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Running evaluation on {device}")
-    
-    # 1. Initialize CFG
-    cfg_path = os.path.join(project_root, 'cfg', 'grammars', 'cfg3b.txt')
-    my_cfg = load_cfg(cfg_path)
-    
-    # 2. Initialize Model (ensure vocab_size matches training: 5)
-    model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
+    import argparse
 
-    # 3. Load Weights
-    # weights_path = os.path.join(project_root, 'gpt_checkpoint_step_6500.pt')  # local
-    weights_path = '/kaggle/input/datasets/periclesalexiou/model4k/gpt_weights_6500.pt'  # Kaggle
-    if os.path.exists(weights_path):
-        checkpoint = torch.load(weights_path, map_location=device)
+    grammars_dir = os.path.join(project_root, 'cfg', 'grammars')
+    available = [f.replace('.txt', '') for f in os.listdir(grammars_dir) if f.endswith('.txt')]
 
-        # Handle both raw state_dict and checkpoint dictionary formats
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
+    parser = argparse.ArgumentParser(description="Completion accuracy evaluation (Result 1)")
+    parser.add_argument("--model", required=True, choices=available_models(),
+                        help=f"Model architecture. Available: {', '.join(sorted(available_models()))}")
+    parser.add_argument("--model_weights", required=True, help="Path to .pt model weights file")
+    parser.add_argument("--cfg", required=True, choices=available,
+                        help=f"Grammar to use. Available: {', '.join(sorted(available))}")
+    parser.add_argument("--n_samples", type=int, default=200)
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    args = parser.parse_args()
 
-        print("Model weights loaded successfully.")
+    print(f"Running evaluation on {args.device}")
 
-    # 4. Move model to the evaluation device. Without this the prefix tensor
-    #    (created on `device`) and the model weights (on cpu) live on different
-    #    devices and the embedding lookup raises a device-mismatch RuntimeError.
-    model.to(device)
+    my_cfg = load_cfg(os.path.join(grammars_dir, f'{args.cfg}.txt'))
 
-    # Result 1 — Completion Accuracy (paper uses 20,000 samples; use fewer for quick checks)
-    # c=0: full generation from scratch
-    evaluate_completion_accuracy(model, my_cfg, num_samples=200, prefix_len=0, device=device)
+    model = build_model(args.model)
+    load_model_weights(model, args.model_weights)
+    print("Model weights loaded successfully.")
+    model.to(args.device)
 
-    # c=50: completion from a 50-token prefix
-    evaluate_completion_accuracy(model, my_cfg, num_samples=200, prefix_len=50, device=device)
+    evaluate_completion_accuracy(model, my_cfg, num_samples=args.n_samples, prefix_len=0, device=args.device)
+    evaluate_completion_accuracy(model, my_cfg, num_samples=args.n_samples, prefix_len=50, device=args.device)

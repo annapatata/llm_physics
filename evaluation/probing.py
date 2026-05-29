@@ -30,7 +30,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from cfg.grammar import load_cfg, CFG, CFGSample
-from models.gpt_rot import GPT2Rotary
+from models import build_model, load_model_weights, available_models
 
 BOS_TOKEN = 0
 EOS_TOKEN = 4
@@ -366,6 +366,7 @@ def evaluate_probe(
 def run_probing_experiment(
     gpt_checkpoint_path: str,
     cfg_path: str,
+    model_name: str = 'gpt_rot',
     levels: Tuple[int, ...] = (2, 3, 4, 5, 6),
     n_probe_iters: int = 30_000,
     n_eval_samples: int = 500,
@@ -384,15 +385,10 @@ def run_probing_experiment(
     """
     cfg = load_cfg(cfg_path)
 
-    model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
+    model = build_model(model_name)
     if not random_gpt:
-        state = torch.load(gpt_checkpoint_path, map_location='cpu')
-        # Support both raw state_dicts and training checkpoints
-        # (training checkpoints wrap the model weights under 'model_state_dict')
-        if 'model_state_dict' in state:
-            state = state['model_state_dict']
-        model.load_state_dict(state)
-        print(f"Loaded GPT weights from {gpt_checkpoint_path}")
+        load_model_weights(model, gpt_checkpoint_path)
+        print(f"Loaded {model_name} weights from {gpt_checkpoint_path}")
     else:
         print("GPT_rand: using RANDOM weights (control condition — should give ~33% accuracy)")
     model.eval()
@@ -471,10 +467,13 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Probing experiment (Results 4-5)")
-    parser.add_argument("--checkpoint", required=True,
-                        help="Path to GPT_rot .pt checkpoint")
-    parser.add_argument("--cfg", default="cfg/grammars/cfg3b.txt",
-                        help="Path to grammar file (relative to project root)")
+    parser.add_argument("--model", required=True, choices=available_models(),
+                        help=f"Model architecture. Available: {', '.join(sorted(available_models()))}")
+    parser.add_argument("--model_weights", required=True, help="Path to .pt model weights file")
+    grammars_dir = os.path.join(project_root, 'cfg', 'grammars')
+    available = [f.replace('.txt', '') for f in os.listdir(grammars_dir) if f.endswith('.txt')]
+    parser.add_argument("--cfg", required=True, choices=available,
+                        help=f"Grammar to use. Available: {', '.join(sorted(available))}")
     parser.add_argument("--levels", nargs="+", type=int, default=[2, 3, 4, 5, 6])
     parser.add_argument("--n_iters", type=int, default=30_000,
                         help="Probe training iterations per level")
@@ -486,8 +485,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_probing_experiment(
-        gpt_checkpoint_path=args.checkpoint,
-        cfg_path=os.path.join(project_root, args.cfg),
+        gpt_checkpoint_path=args.model_weights,
+        cfg_path=os.path.join(grammars_dir, f'{args.cfg}.txt'),
+        model_name=args.model,
         levels=tuple(args.levels),
         n_probe_iters=args.n_iters,
         n_eval_samples=args.n_eval,

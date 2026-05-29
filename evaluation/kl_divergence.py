@@ -58,7 +58,7 @@ sys.path.append(project_root)
 
 from cfg.grammar import load_cfg
 from dp.binarize import binarize, BinarizedCFG
-from models.gpt_rot import GPT2Rotary
+from models import build_model, load_model_weights, available_models
 
 BOS_TOKEN = 0
 EOS_TOKEN = 4
@@ -386,6 +386,7 @@ def compute_kl_for_string(
 def run_kl_evaluation(
     gpt_checkpoint_path: str,
     cfg_path: str,
+    model_name: str = 'gpt_rot',
     n_strings: int = 200,
     max_string_len: int = 400,
     device: str = "cuda",
@@ -413,11 +414,10 @@ def run_kl_evaluation(
     M = _precompute_right_matrix(bcfg, nt_idx, nt_list)
     print(f"Grammar: {len(nt_list)} NTs, {len(bcfg.binary_rules)} rules after binarization")
 
-    model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
+    model = build_model(model_name)
     if not random_gpt:
-        state = torch.load(gpt_checkpoint_path, map_location="cpu")
-        model.load_state_dict(state)
-        print(f"Loaded GPT weights from {gpt_checkpoint_path}")
+        load_model_weights(model, gpt_checkpoint_path)
+        print(f"Loaded {model_name} weights from {gpt_checkpoint_path}")
     else:
         print("GPT_rand: using random weights (expected KL >> 0)")
     model.eval()
@@ -470,8 +470,13 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="KL divergence evaluation (Result 3)")
-    parser.add_argument("--checkpoint", required=True, help="Path to GPT_rot .pt checkpoint")
-    parser.add_argument("--cfg",        default="cfg/grammars/cfg3b.txt")
+    grammars_dir = os.path.join(project_root, 'cfg', 'grammars')
+    available = [f.replace('.txt', '') for f in os.listdir(grammars_dir) if f.endswith('.txt')]
+    parser.add_argument("--model", required=True, choices=available_models(),
+                        help=f"Model architecture. Available: {', '.join(sorted(available_models()))}")
+    parser.add_argument("--model_weights", required=True, help="Path to .pt model weights file")
+    parser.add_argument("--cfg", required=True, choices=available,
+                        help=f"Grammar to use. Available: {', '.join(sorted(available))}")
     parser.add_argument("--n_strings",  type=int, default=200)
     parser.add_argument("--max_len",    type=int, default=400)
     parser.add_argument("--device",     default="cuda" if torch.cuda.is_available() else "cpu")
@@ -479,8 +484,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_kl_evaluation(
-        gpt_checkpoint_path=args.checkpoint,
-        cfg_path=os.path.join(project_root, args.cfg),
+        gpt_checkpoint_path=args.model_weights,
+        cfg_path=os.path.join(grammars_dir, f'{args.cfg}.txt'),
+        model_name=args.model,
         n_strings=args.n_strings,
         max_string_len=args.max_len,
         device=args.device,
