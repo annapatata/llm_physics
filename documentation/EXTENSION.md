@@ -142,11 +142,24 @@ controls replace it cleanly.
   NT6 drops CYK *and* moves bigram, that contrast is itself evidence for the
   level interpretation.
 
-- **ℓ\*: last layer (layer 11).** Existing `probing.py` results already probe
-  the last hidden layer; the NT5 99.9% figure comes from there. `probing_all.py`
-  would refine this if an intermediate layer turned out to be stronger, but
-  given 99.9% there is little room to improve. Running probing_all.py first
-  is not required.
+- **ℓ\*: an intermediate layer (NOT the last) — chosen via `probing_all.py`.**
+  *Probe site ≠ patch site.* The Result-5 probe reads the **last** block
+  (`blocks[-1]`), where NT5 is 99.9% decodable — but that is the wrong place to
+  *patch* for a generation test. After the last block there is only `ln_f` +
+  `lm_head`, both position-wise: nothing mixes positions. So overwriting a
+  *prefix* boundary state at the last layer changes only that position's own
+  logit (the already-fixed next token) and **never reaches the token being
+  generated**. The corruption can only propagate forward through **attention**,
+  which lives *inside* the blocks — so the patch must happen at a layer with
+  blocks still above it. (Confirmed empirically: a last-layer patch leaves the
+  completion bit-identical to clean; see `patching.py:efficacy_check`.)
+
+  We therefore patch at an intermediate layer ℓ\*: the **earliest** layer where
+  NT5 is already strongly decodable (per `probing_all.py`'s per-layer scan),
+  which maximizes the number of downstream blocks available to carry the
+  corrupted boundary state to later positions. Running `probing_all.py` first is
+  now **required**, not optional. The donor states are captured at the same ℓ\*,
+  so the whole pipeline is layer-parameterized (`--layer`).
 
 - **Donor: boundary-matched, per-position, different-NT.** A donor is accepted
   if it shares **≥ 3 level-ℓ boundary positions with `x_clean` at the same

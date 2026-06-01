@@ -169,17 +169,61 @@ def identity_check(model: GPT2Rotary, token_ids, layer: int, positions, device: 
     return ok
 
 
+@torch.no_grad()
+def efficacy_check(model: GPT2Rotary, token_ids, layer: int, positions, device: str):
+    """
+    Patch `positions` (in the prefix) with *different* (random) values and report
+    how much the **last-position** logits move. This is the check identity_check
+    can't do: it proves the patch actually propagates forward to the token being
+    generated.
+
+    Crucial diagnostic for picking the patch layer: patching the LAST block is
+    causally inert for generation (nothing downstream mixes positions), so the
+    last-position logits won't move. Patching an EARLIER block lets the remaining
+    blocks' attention carry the corruption to the last position, so they will.
+    """
+    model.eval()
+    idx = torch.as_tensor(token_ids, dtype=torch.long, device=device).unsqueeze(0)
+
+    clean_logits = model(idx)
+    last_clean = clean_logits[:, -1, :]
+
+    clean_resid = capture_residual(model, token_ids, layer, device)
+    pos = torch.as_tensor(positions, dtype=torch.long)
+    # Different values: scaled random noise (not the clean values).
+    sigma = clean_resid[pos].std()
+    rand_vals = sigma * torch.randn(len(pos), clean_resid.shape[-1])
+
+    with ActivationPatcher(model, layer) as patcher:
+        patcher.set_patch(pos, rand_vals.to(device))
+        patched_logits = model(idx)
+    last_patched = patched_logits[:, -1, :]
+
+    last_diff = (last_clean - last_patched).abs().max().item()
+    reaches = last_diff > 1e-6
+    tag = "[OK]" if reaches else "[INERT]"
+    print(f"  layer={layer:>3}  max |Δ last-position logit| = {last_diff:.3e}  "
+          f"{tag} {'reaches generation' if reaches else 'does NOT reach generation'}")
+    return reaches
+
+
 if __name__ == "__main__":
-    # The identity check is weight-agnostic, so a random model on CPU is enough
-    # to validate the mechanism. (Real experiments load the trained checkpoint.)
+    # The checks are weight-agnostic, so a random model on CPU is enough to
+    # validate the mechanism. (Real experiments load the trained checkpoint.)
     device = "cpu"
     torch.manual_seed(0)
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
     model.eval().to(device)
 
-    # A toy [BOS] + terminals sequence; positions chosen anywhere in it.
+    # A toy [BOS] + terminals sequence; patch positions in the prefix, then ask
+    # whether the patch reaches the LAST position (the one generation samples).
     token_ids = [BOS_TOKEN, 1, 2, 3, 1, 1, 2, 3, 2, 1, 3]
-    print("Identity check (random weights, CPU) -- mechanism validation only:")
-    # layer=-1 is the last block (== blocks[11]) -- the exact residual stream
-    # probing.py reads from, so the patch site matches the NT5 probe site.
-    identity_check(model, token_ids, layer=-1, positions=[2, 5, 8], device=device)
+    positions = [2, 5, 8]
+
+    print("Identity check (no-op patch must be bit-identical):")
+    identity_check(model, token_ids, layer=6, positions=positions, device=device)
+
+    print("\nEfficacy check across layers (does the patch reach generation?):")
+    print("  Expecting: early/middle layers reach; the LAST block is inert.")
+    for layer in [0, 3, 6, 9, 11]:
+        efficacy_check(model, token_ids, layer=layer, positions=positions, device=device)

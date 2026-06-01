@@ -32,12 +32,14 @@ from tqdm import tqdm
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+this_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(this_dir)
 sys.path.append(project_root)
+sys.path.append(this_dir)  # so `probing` (sibling module) is importable
 
 from cfg.grammar import load_cfg, CFG
 from models.gpt_rot import GPT2Rotary
-from evaluation.probing import (
+from probing import (
     MultiHeadLinearProbe,
     build_label_mapping,
     BOS_TOKEN,

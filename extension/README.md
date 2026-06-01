@@ -20,10 +20,11 @@ statistics (bigram distribution) stay roughly unchanged — a structure-vs-surfa
 
 | Step | File | What it does | Needs |
 |---|---|---|---|
-| 1 | `patching.py` | The patch hook + an identity check (no-op patch ⇒ identical logits). Run standalone to validate the mechanism. | nothing (CPU, random weights) |
+| 1 | `patching.py` | The patch hook + identity check (no-op ⇒ identical logits) + **efficacy check** (does the patch reach generation?). Run standalone to validate the mechanism. | nothing (CPU, random weights) |
 | 2 | `build_corpus.py` | Sample M valid CFG strings once, store full parse annotations, and **measure the donor acceptance rate**. | grammar only |
 | 3 | `build_trials.py` | Match N `(clean, donor)` pairs from the corpus by pure indexing; freeze them to disk. | corpus (step 2) |
-| 4 | `patch_experiment.py` | For each trial, generate under 4 conditions and score CYK validity (structural) + bigram KL (surface). | trials (step 3) **and the GPT checkpoint** |
+| – | `evaluation/probing_all.py` | Per-layer NT5 decodability scan — **required** to pick the patch layer ℓ\* (the last layer is causally inert; see Conventions). | GPU + checkpoint |
+| 4 | `patch_experiment.py` | For each trial, generate under 4 conditions and score CYK validity (structural) + bigram KL (surface). Pass `--layer ℓ*`. | trials (step 3) **and the GPT checkpoint** |
 
 Outputs land in `extension/cache/`:
 - `corpus_cfg3b.pt` — the M sampled strings + annotations.
@@ -60,8 +61,15 @@ and `noise_boundary` (collapse of both) — that gap is the causal evidence.
 
 ## Key conventions (easy to trip on)
 
-- **Target:** NT5, layer `-1` (the last block — the exact residual stream
-  `evaluation/probing.py` reads, so the patch site == the probe site).
+- **Target:** NT5, at an **intermediate** layer ℓ\* (NOT the last). The probe
+  reads the last block, but patching there is causally inert for generation —
+  after the last block only `ln_f`+`lm_head` remain, and they don't mix
+  positions, so a corrupted *prefix* state can't reach the token being generated.
+  The patch must sit at a layer with blocks still above it, so attention can
+  carry the corruption forward. Pick ℓ\* with `evaluation/probing_all.py` (the
+  earliest layer where NT5 is strongly decodable) and pass it via `--layer`.
+  Use `patching.py`'s `efficacy_check` to confirm a layer actually reaches
+  generation.
 - **BOS offset:** annotations index terminals (no BOS); the model sequence is
   `[BOS] + string`, so terminal `i` is at sequence index `i+1`. Trials store both
   `positions_terminal` (for annotation lookups) and `positions_seq` (for the
