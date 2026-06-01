@@ -1,131 +1,280 @@
 # EXTENSION.md — Activation Patching of Boundary Hidden States
 
-Extension to the Allen-Zhu & Li (2023) reproduction. Designed as a follow-up to Results 4-9: tests whether the boundary-hidden-state encoding of NT identity is **causally** load-bearing for structured generation, not just a correlate of it.
+Extension to the Allen-Zhu & Li (2023) reproduction. Follow-up to Results 4-9:
+tests whether the boundary-hidden-state encoding of NT identity is **causally**
+load-bearing for structured generation, not just a correlate of it.
 
 ## 1. Hypothesis
 
-Results 5-9 established that for trained GPT_rot:
-- The NT identity of the level-ℓ subtree rooted at terminal i is linearly readable from the hidden state at i when `boundaries[ℓ][i] == 1` (Result 5).
-- Attention preferentially routes from boundaries to nearest-previous same-level boundaries (Results 7-9), matching the data flow of CYK / inside DP.
+Result 5 showed that for trained GPT_rot, NT identity at level ℓ is linearly
+readable from the hidden state at positions where `boundaries[ℓ][i] == 1`.
+Probing shows information is *present*. It doesn't show information is *used*.
 
-**Causal claim being tested:** the model's structured generation depends specifically on the *content* of those boundary hidden states. If we corrupt them surgically, the model should produce strings that look locally normal (correct unigram / short n-gram statistics) but break at the structural level (CYK-invalid, broken nesting).
-
-If the dissociation holds, we have causal — not merely correlational — evidence for the DP mechanism. If structural and surface metrics fall together, the boundary representation is incidental and the network achieves grammaticality some other way.
+**Causal claim being tested:** if we surgically swap those boundary hidden
+states for a donor's, the model's structural generation breaks (CYK-invalid)
+while its surface statistics (terminal-token marginals) stay close to baseline.
+A *dissociation* between structural and surface metrics is what makes this a
+use-test, not just "we perturbed the model and it got worse."
 
 ## 2. The intervention
 
-Standard activation patching. Three full-sequence forward passes per trial:
+Standard activation patching. Per trial:
 
-1. **Clean run.** Feed valid CFG string `x_clean` (shape `(1, L+2)` with BOS/EOS) through the model in one pass. Cache the residual stream at every layer via forward hooks → `H_clean[ℓ]` of shape `(L+2, 768)`.
-2. **Donor run.** Same with an independently sampled `x_donor`. Cache `H_donor[ℓ]`.
-3. **Patched run.** Feed `x_clean` again. At target layer ℓ\*, install a hook that **overwrites** the layer's output: at positions i where `x_clean.boundaries[ℓ][i] == 1`, replace `H[ℓ\*][0, i, :]` with `H_donor[ℓ\*][0, i, :]`. Let the rest of the forward pass propagate. Read final-layer logits, or take the patched final-layer state at position L and continue with `generate_autoregressive` from `evaluation/evaluation.py`.
+1. Sample `x_clean` (valid CFG string). Take prefix = `[BOS] + x_clean[:50]`.
+2. Sample a *boundary-matched donor* — another valid CFG string that shares
+   **≥ 3 level-ℓ boundary positions with `x_clean` at the same absolute
+   indices** within the prefix, and carries a **different valid NT-ℓ identity**
+   at each shared position. Patch *exactly* those shared positions. The donor is
+   drawn from the natural CFG length distribution, not length-matched (see §5).
+3. Cache the donor's hidden state at layer ℓ\* at those shared positions.
+4. Run autoregressive generation from the prefix, but with a forward hook on
+   layer ℓ\* that — on every forward pass — replaces the residual stream at
+   the shared level-ℓ boundary positions of the prefix with the donor's values.
+   The continuation tokens are never directly patched; the effect reaches them
+   only through attention back onto the patched prefix positions.
+5. Score the completion (structural: CYK validity; surface: bigram KL vs.
+   the CFG's true bigram transition distribution).
 
-Same input-length and full-parallel forward-pass shape across all three runs — no token-by-token feeding. This is the same mechanism `probing.py:_make_hook` (lines 41-47) uses for reading, with a return value so PyTorch substitutes it back into the graph.
+This is the same hook mechanism `probing.py:_make_hook` uses for reading, with
+a `return` so PyTorch substitutes the modified tensor back into the graph.
+
+### What "patching level ℓ" means
+
+We don't surgically replace "level-ℓ bits" — there's one 768-d vector per
+token, with no level slots. Level-ℓ specificity comes from *position selection*:
+
+- We patch at positions where `boundaries[ℓ][i] == 1` (right edges of level-ℓ
+  subtrees).
+- The donor must also have level-ℓ boundaries at those positions, so we swap
+  one valid level-ℓ NT identity for another (not erase it).
+
+Caveat we accept: those positions also encode higher-level NT info, which gets
+swapped too. Across N trials with random donors, that info varies randomly and
+the systematic effect is the level-ℓ swap (which is enforced). A subspace
+projection swap (only the probe direction) would be the surgical version —
+flagged here as future work.
 
 ## 3. The critical dissociation: surface vs. structure
 
-The whole experiment lives or dies on this metric pair. Without a *separation* between surface and structure, "accuracy dropped" is uninterpretable.
+Without this dissociation, a "validity dropped" number is uninterpretable.
 
-**Structural metrics (should break):**
-- **CYK validity** of the patched-generation completion (`dp/cyk.py:is_valid`). Primary metric.
-- **KL(P_model_patched ‖ P_CFG) at boundary positions and inside long subtrees**, computed with `dp/inside.py`.
-- **Nesting integrity**: re-parse the generated string with CYK; count how many level-ℓ subtrees it contains vs. expected distribution.
+- **Structural (should break under boundary patch):** CYK validity of the
+  generated completion (`dp/cyk.py:is_valid`).
+- **Surface (should stay close to baseline):** bigram KL between the generated
+  terminals' transition distribution and the **CFG's true bigram transition
+  distribution** `P(next | prev)`. Optional: trigram KL (secondary), mean
+  per-token entropy.
 
-**Surface metrics (should stay close to baseline):**
-- **Unigram KL** between generated terminals and CFG's true terminal marginals (estimate marginals by sampling ~10K CFG strings once).
-- **Bigram KL** under a CFG-marginal bigram model fit on sampled CFG strings.
-- **Per-token entropy** averaged over generation — patching shouldn't make the model wildly uncertain about local choices.
+We reference the surface metric to the *grammar's* true distribution, not to the
+clean-condition output, so that the structural and surface axes are symmetric:
+both "did the structure break" and "did the surface drift" are measured against
+the ground truth the model was trained to match.
 
-The headline plot: for each intervention type, two bars — % drop in CYK validity vs. % drop in (1 − unigram-KL-normalized). Boundary-patch should show a large gap; controls should show similar drops on both.
+Headline plot: for each condition, two bars — CYK validity drop vs. bigram-KL
+drift. Boundary patch should show a large gap; the control should show similar
+movement on both bars (or no movement on either).
 
-## 4. Control suite
+## 4. The two controls
 
-Without controls, this is not a real test.
+| Control | Manipulation | Prediction | What it establishes |
+|---|---|---|---|
+| **Noise @ boundary** | Same layer, same boundary positions, replace with Gaussian noise (zero-mean, variance matched to the residual stream) instead of a donor | Both CYK validity and the surface metric drop together — noise is non-specific | The donor patch's structural-only collapse is about swapping NT *identity*, not generic perturbation of those positions |
+| **Noise @ non-boundary** | Same layer, same *number* of positions, Gaussian noise at non-boundary positions chosen at random | CYK validity stays high; surface metric may move slightly | If structure survives when everything *except* boundaries is corrupted, the boundary positions are *sufficient* to carry the structural load |
 
-| Control | Manipulation | Predicted outcome under hypothesis |
-|---|---|---|
-| **Random-position patch** | Same layer, same donor, same # positions, but patch *non-boundary* positions chosen at random | Smaller structural drop than boundary patch — ideally comparable to no-patch baseline |
-| **Random-noise patch** | Replace boundary states with Gaussian noise of matched per-position norm | Isolates "missing info" vs "wrong info" — if noise hurts as much as donor, the model just needs *anything coherent*; if donor hurts more, it specifically follows the wrong DP state |
-| **Early-layer patch** | Same boundary positions but at a layer *before* Result 5 accuracy ramps up (likely layer 0-3) | Smaller effect — boundary info isn't there yet |
-| **Late-layer patch** | Same boundary positions at the layer where Result 5 accuracy peaks (TBD from our probing run, paper suggests mid-to-late) | Largest effect |
-| **Level sweep** | Patch only level-2 boundaries vs. only level-6 boundaries (separate runs) | Given our checkpoint only encodes level-6 (see §7): NT2 patch ≈ no-op (no representation to corrupt), NT6 patch breaks structure. Sharper dissociation than the original "different breakage profiles" prediction |
-| **GPT_rand control** | Same intervention on randomly initialized model | No specific effect of boundary positions — flat across position types |
+The two controls bracket the claim from both sides:
 
-## 5. What infrastructure already exists
+- **Noise @ boundary (specificity):** noise at boundaries is a generic
+  perturbation and breaks everything; a donor patch at boundaries is a
+  structured swap and breaks only structure. The gap between these two is the
+  core causal evidence.
+- **Noise @ non-boundary (sufficiency):** if structure survives noise
+  everywhere but the boundaries, then the boundaries alone are doing the
+  structural work — the model is reconstructing the parse from boundary
+  representations.
 
-- `cfg/grammar.py` → `CFGSample.boundaries[ℓ]`, `deepest_boundary`, `ancestor_indices` — all the position labels we need.
-- `models/gpt_rot.py` → exposes `model.blocks[ℓ]`; supports `return_all_attentions`. Forward hooks attach cleanly per `probing.py:_make_hook`.
-- `dp/cyk.py:is_valid` → structural oracle. ~0.3s per length-280 string; budget accordingly.
-- `dp/inside.py` → for KL computation under the true CFG.
-- `evaluation/evaluation.py:generate_autoregressive` → reusable for continuing generation from a patched state.
-- `evaluation/probing.py` → already extracts hidden states in batches with hooks; copy that pattern.
-- Trained checkpoint paths: `gpt_checkpoint_step_6500.pt` (also `/kaggle/input/datasets/periclesalexiou/model4k/gpt_weights_6500.pt` for Kaggle).
+The original draft's "donor patch at random positions" tested spatial
+specificity but conflated identity-swap with perturbation. The two noise
+controls replace it cleanly.
 
-## 6. What needs to be written
+## 5. Decisions (locked)
 
-New file: `evaluation/patching.py`.
+- **Grammar: cfg3b.** Our checkpoint is trained on cfg3b.
 
-Components:
-
-1. **Multi-layer hook manager.** Register forward hooks on all 12 blocks. Two modes:
-   - *Read mode*: cache outputs into a dict keyed by layer index.
-   - *Write mode*: at a chosen layer, *return* a modified tensor that PyTorch will substitute back. Must handle that `GPTBlock.forward` returns either `tensor` or `(tensor, attn_weights)` (see `probing.py:_make_hook` for the unpacking trick).
-2. **`run_with_patch(model, x_clean_tokens, donor_states, layer_star, positions_to_patch)`** → returns final-layer logits and the patched residual stream at the last position (for downstream generation).
-3. **Metric helpers:**
-   - `surface_metrics(generated_tokens, cfg)` → unigram-KL, bigram-KL, mean entropy.
-   - `structural_metrics(generated_tokens, cfg)` → CYK-validity bool, optional inside-prob NLL.
-4. **Experiment driver** that loops over N trials, applies each intervention condition, accumulates the metric pair, and prints the surface-vs-structure dissociation table.
-
-Estimated size: ~300-400 LOC including controls.
-
-## 7. Decisions (locked)
-
-These were the open design choices flagged before coding; here are the chosen values with rationale.
-
-- **Grammar: cfg3b.** Our checkpoint is trained on cfg3b (the paper's sharpest results are on cfg3f, but we work with what we have).
-
-- **Target level: NT6 only.** Our Result 5 numbers (diagonal probe at boundaries) on the 6500-step checkpoint:
+- **Target level: NT5.** Diagonal probe @ boundary on the 6500-step checkpoint:
 
   | Level | Diag@boundary |
   |---|---|
-  | NT2 | 39.2% |
-  | NT3 | 47.6% |
-  | NT4 | 33.7% (chance) |
-  | NT5 | 42.5% |
-  | NT6 | 81.9% |
+  | NT2 | 87.1% |
+  | NT3 | 66.3% |
+  | NT4 | 89.5% |
+  | NT5 | 99.9% |
+  | NT6 | 91.9% |
 
-  Chance is ~33% (3 classes). Only NT6 shows a strong boundary representation in our undertrained checkpoint (6500 steps vs. the paper's 100K). A causal test only makes sense for a representation that's actually formed — patching at NT4 would be patching noise. This also *sharpens* the level-sweep control (§4): under our hypothesis an NT2 patch should be a near-no-op, while an NT6 patch should break structural generation.
+  NT5 has the strongest representation, so it has the most signal for the
+  causal test. (If results come in cleanly, a follow-up at NT3 — the weakest
+  representation — would give a graded prediction. Not in scope here.)
 
-- **ℓ\*: chosen by per-layer diagonal-probe scan at NT6.** Scan all 12 blocks, ~5K iters per layer (vs. the full 30K). We only need the *shape* of the per-layer accuracy curve to find the peak — not publication-quality probes. The current `probing.py` only hooks the last block, so this is a small extension.
+  **Why not NT6, even though it isolates more cleanly.** Boundary nesting runs
+  downward: a level-ℓ boundary is also a boundary at every *deeper* level
+  ℓ+1…6. So at an NT5 boundary, NT6 *always* rides along in the same vector and
+  is swapped every trial — the one confound pairs-averaging cannot remove (only
+  subspace projection can; future work). NT6, being the deepest NT level (level
+  7 = terminals), has *nothing* nested below it, so with pairs it is isolated
+  with no un-averageable confound. That makes NT6 the cleaner target on the
+  *isolation* axis — but the worse target on the *dissociation* axis, which
+  matters more:
 
-- **Donor: boundary-matched.** A plain same-length donor isn't guaranteed to have a level-6 boundary at the patched positions. If it doesn't, we're *erasing* the boundary representation rather than *swapping* it — that's closer in spirit to the noise control and muddies the causal claim. Boundary-matched donors (rejection-sample so the donor also has a level-6 boundary at every patched position) isolate the cleanest swap: one valid NT identity replaced by a different valid one.
+  - A level-6 NT expands directly to ~2–3 terminals, so NT6 essentially *is* the
+    local surface (bigram) structure. Corrupting it moves the **surface metric
+    too**, collapsing the structure-vs-surface dissociation that makes this a
+    *use*-test rather than "we broke the model."
+  - NT6 boundaries are dense (~every 2–3 tokens, ~40% of positions), so patching
+    them is a sledgehammer, not a surgical probe — surface stats drift from sheer
+    volume of overwriting.
+  - NT6's representation (91.9%) is weaker than NT5's (99.9%).
 
-- **Measurement: both per-position KL and CYK on continuation.** KL is fast, deterministic, and gives a per-position sensitivity signal. CYK on the autoregressive continuation is the headline structural-vs-surface dissociation. The two answer different questions; we report both.
+  NT5 is the sweet spot: deep enough to carry a near-perfect, *structural*
+  representation, shallow enough that corrupting it breaks the *global* parse
+  while leaving *local* bigram texture intact. Its only cost is the NT5/NT6
+  confound, which pairs narrows the culprit to {NT5, NT6} and subspace
+  projection would finish separating. NT6 (and NT3) are therefore optional
+  *contrast* panels, not the headline: if NT5 drops CYK with bigram flat while
+  NT6 drops CYK *and* moves bigram, that contrast is itself evidence for the
+  level interpretation.
 
-- **N trials: 500 per condition.** Each trial is 2–3 forward passes + 1 CYK check (~0.3s); 500 is cheap and gives tight error bars.
+- **ℓ\*: last layer (layer 11).** Existing `probing.py` results already probe
+  the last hidden layer; the NT5 99.9% figure comes from there. `probing_all.py`
+  would refine this if an intermediate layer turned out to be stronger, but
+  given 99.9% there is little room to improve. Running probing_all.py first
+  is not required.
 
-## 8. Suggested execution order
+- **Donor: boundary-matched, per-position, different-NT.** A donor is accepted
+  if it shares **≥ 3 level-ℓ boundary positions with `x_clean` at the same
+  absolute indices** (within the prefix window) and carries a **different valid
+  NT-ℓ** at each shared position. We patch exactly the shared positions, swapping
+  a valid NT identity for a *different* valid one — not erasing it.
 
-1. Extend probing to scan layers at NT6 (the only level with a strong representation in our checkpoint — see §7). Pick ℓ\* from the per-layer accuracy peak.
-2. Write the hook manager + `run_with_patch`. Test it does nothing when no patch is requested (identity check) and does *something* when a random patch is applied.
-3. Implement metric helpers. Sanity-check on clean generations that surface KLs are near zero and CYK validity matches `evaluation.py`'s baseline.
-4. Run main condition (boundary patch at ℓ\*) + random-position control. If no dissociation here, the rest is moot — stop and reconsider.
-5. Run remaining controls (noise patch, early-layer, GPT_rand).
-6. Run level sweep.
-7. Plot: bar chart of structural drop vs. surface drop, per condition.
+  Three constraints drive this:
 
-## 9. What success looks like
+  1. **Same absolute position.** The model uses RoPE, so a hidden state carries
+     relative-position information; injecting a donor's position-`j` state at
+     clean's position `i ≠ j` adds a positional confound. So we require the donor
+     to have a level-ℓ boundary at the *exact* index `i` we patch, which also
+     forces `len(donor) > i`.
+  2. **Different NT-ℓ.** If the donor carried the *same* NT-ℓ as clean, the patch
+     would be a near no-op. The swap must change identity to test causal use.
+  3. **Natural length distribution.** We do *not* length-match donor to clean —
+     only `len(donor) > i` is mechanically required. We draw donors from the
+     natural CFG length distribution so that the higher-level NT info that
+     unavoidably rides along in the patched vector (the contamination noted in
+     §2) varies *randomly* across trials instead of systematically. Biasing
+     toward short donors would make that contamination systematic and weaken the
+     control.
 
-A figure showing: under boundary patching at the peak layer, CYK validity drops by ≥30 percentage points while unigram KL changes by <0.05 nats. Under random-position patching with matched count, both drops are within 5 pp / 0.05 nats of each other. Under GPT_rand, position type has no effect.
+  **Sampling strategy A (default — single coherent donor):** reject-sample
+  candidate strings; for each, intersect its level-ℓ boundary mask with
+  `x_clean`'s over the prefix, keep positions where the NT differs, and accept if
+  ≥ 3 such positions exist. This injects one *internally consistent* alternative
+  parse, which is the cleaner manipulation. Cost: requiring ≥ 3 same-index
+  coincidences with NT-difference rejects many candidates, so we sample a pool
+  and keep qualifiers.
 
-That's the entire result. One figure, one table of controls, one sentence: "corrupting boundary hidden states selectively breaks structural generation, providing causal evidence for the DP mechanism inferred from Results 5-9."
+  **Sampling strategy B (fallback — per-position pool):** if strategy A's
+  rejection rate is impractical, decouple the matching. Pre-sample a pool of
+  valid strings and record each one's level-ℓ boundary positions and NT
+  identities. Then, for *each* patched position `i` independently, pull a donor
+  from the pool that has a level-ℓ boundary at exactly `i` with an NT different
+  from clean's, and take *that* donor's hidden state at `i`. Different patched
+  positions may draw from different donor strings. This trades the
+  internally-consistent single parse (strategy A) for a much easier matching
+  problem — each position only needs *one* coincidence instead of all of them
+  simultaneously — at the cost that the injected boundary states no longer come
+  from one coherent tree. Start with A; switch to B only if sampling A is too
+  slow.
 
-## 10. References to relevant code
+- **Measurement: CYK on continuation + bigram KL.** Bigram KL between the
+  generated terminals' transition distribution and the **CFG's true bigram
+  distribution** `P(next | prev)` (estimated once from a large sample of valid
+  strings) is used instead of unigram KL. Referencing the grammar's true
+  distribution — not the clean condition's output — keeps the structural and
+  surface axes symmetric (both measured against ground truth).
 
+  *Why not unigram:* measured on cfg3b (300 sampled strings), the terminal
+  marginal is essentially uniform — `{1: 0.334, 2: 0.333, 3: 0.333}`. Unigram
+  KL is therefore trivially ~0 for almost any output, including garbage, so it
+  can't dissociate anything.
+
+  *Why bigram works:* the bigram conditional `P(next | prev)` is strongly
+  structured (a token rarely follows itself):
+
+  | prev \ next | 1 | 2 | 3 |
+  |---|---|---|---|
+  | **1** | 0.102 | 0.476 | 0.422 |
+  | **2** | 0.486 | 0.089 | 0.425 |
+  | **3** | 0.417 | 0.435 | 0.148 |
+
+  Mutual information I(prev; next) ≈ 0.135 nats — far from the 0 of independent
+  terminals. So bigram KL *can* move, which makes "bigram KL stays near
+  baseline" a falsifiable surface claim rather than a trivially-true one.
+
+  *Why not trigram as the headline:* the surface metric must stay agnostic to
+  tree structure (that's the dissociation). Higher n-gram orders capture
+  longer-range correlations that increasingly *are* the structure CYK should
+  own. In cfg3b the lowest-level constituents are tiny — a level-6 NT expands
+  to only ~2–3 terminals — so a 3-token window can straddle an entire low-level
+  subtree, making trigram KL partly a *structural* check. Bigram windows mostly
+  sit inside constituents and capture local "what follows what" texture (the
+  "right word by word" notion). Trigram also costs variance: 27 cells vs 9, and
+  per-trial continuations are short. Bigram is therefore the headline.
+
+  *Trigram as a secondary check:* we still report trigram KL as a robustness
+  sanity check, with the explicit caveat that it partly reflects low-level
+  constituent validity and so is expected to move somewhat more than bigram
+  even under a clean structural dissociation.
+
+  Both metrics are computed per trial; we report rates/means across N trials.
+
+- **N trials: 500 per condition.** Each trial is 2–3 forward passes + 1 CYK
+  check (~0.3s); 500 fits in well under an hour.
+
+## 6. Suggested execution order
+
+1. Identity-check the hook in `extension/patching.py` (no-op patch must
+   produce logits identical to vanilla forward).
+2. Build the corpus once: `extension/build_corpus.py` (samples M valid strings,
+   reports the donor acceptance rate).
+3. Freeze the trials: `extension/build_trials.py` (matches N clean/donor pairs).
+4. Run the sweep at (NT5, layer −1): `extension/patch_experiment.py` — clean
+   baseline, donor patch, noise@boundary, noise@non-boundary.
+5. Plot: bar chart of CYK validity vs. bigram KL per condition.
+
+## 7. What success looks like
+
+Under boundary patching at ℓ\*, CYK validity drops substantially (target: ≥30
+percentage points below clean baseline) while bigram KL stays close to
+baseline. Under noise patching at the same boundary positions, both CYK
+validity and bigram KL drop together (noise is non-specific). The contrast
+between the two conditions is the result.
+
+That's the result. One figure, one control, one sentence: "corrupting boundary
+hidden states selectively breaks structural generation, providing causal
+evidence that the NT-boundary encoding identified by Result 5 is used by the
+model."
+
+## 8. References to relevant code
+
+The extension lives in `extension/` (see `extension/README.md`):
+
+- Patch hook + identity check: `extension/patching.py`
+- Corpus builder + donor matching: `extension/build_corpus.py`
+- Trial freezer: `extension/build_trials.py`
+- Experiment driver + metrics: `extension/patch_experiment.py`
+
+Reused from the main reproduction:
+
+- Per-layer probe scan (for picking ℓ\*): `evaluation/probing_all.py`
 - Hidden-state extraction pattern: `evaluation/probing.py:41-78`
 - Generation loop: `evaluation/evaluation.py:23-53`
-- Boundary labels: `cfg/grammar.py` (`CFGSample.boundaries`, `deepest_boundary`, `ancestor_indices`)
+- Boundary labels: `cfg/grammar.py` (`CFGSample.boundaries`)
 - Structural oracle: `dp/cyk.py:is_valid`
-- True-distribution probability: `dp/inside.py`
 - Model block list: `models/gpt_rot.py` (`model.blocks[ℓ]`)
-- CONTEXT.md has the paper-section ↔ implementation map; consult before any design call.
