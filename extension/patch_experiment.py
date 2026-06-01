@@ -4,7 +4,9 @@ The activation-patching experiment (EXTENSION.md §2, §6).
 Loads the frozen trials (Step B) and, for each trial, generates a completion
 under several conditions, scoring each with:
   - CYK validity (structural — should break under the boundary donor patch)
-  - bigram KL vs the grammar's true P(next|prev) (surface — should stay flat)
+  - n-gram KL (orders 2-4) vs the grammar's true P(next | prev) — a surface->
+    structure gradient: low orders are local (should stay flat), higher orders
+    span constituents and should drift more under the boundary patch.
 
 Conditions
 ----------
@@ -76,20 +78,34 @@ def generate(model, prefix_tokens, temperature=1.0, device="cuda"):
     return prefix_tokens + generated
 
 
-# ── Surface metric: bigram KL vs the grammar's true transition distribution ──────
+# ── Surface->structure metric: n-gram KL vs the grammar's true transitions ───────
+#
+# An order-n n-gram measures P(next terminal | previous n-1 terminals). As n
+# grows the window stops being purely local "surface" and starts spanning whole
+# constituents (NT6 ~ 3 terminals, NT5 ~ 4-9), so it picks up more structure.
+# Corrupting NT5 should therefore move the KL more at higher orders -> a monotone
+# "structure-order gradient" that hands off to the global CYK metric.
 
-def true_bigram_distribution(corpus_payload, eps=1e-9):
-    """Estimate P_true(next | prev) once from the corpus's valid strings."""
-    counts = np.zeros((3, 3), dtype=np.float64)
+ORDERS = (2, 3, 4)  # bigram, trigram, 4-gram
+
+
+def add_ngrams(counts, seq, order):
+    """Accumulate order-n counts into a (3**(order-1), 3) table: context -> next.
+    The context index is the base-3 encoding of the previous order-1 terminals."""
+    idxs = [TERM_TO_IDX[t] for t in seq if t in TERM_TO_IDX]
+    for i in range(len(idxs) - order + 1):
+        ctx = 0
+        for j in range(order - 1):
+            ctx = ctx * 3 + idxs[i + j]
+        counts[ctx, idxs[i + order - 1]] += 1.0
+
+
+def true_ngram_distribution(corpus_payload, order, eps=1e-9):
+    """Estimate P_true(next | prev order-1) once from the corpus's valid strings."""
+    counts = np.zeros((3 ** (order - 1), 3), dtype=np.float64)
     for s in corpus_payload["samples"]:
-        add_bigrams(counts, s["string"])
+        add_ngrams(counts, s["string"], order)
     return normalize_rows(counts, eps)
-
-
-def add_bigrams(counts, seq):
-    for a, b in zip(seq[:-1], seq[1:]):
-        if a in TERM_TO_IDX and b in TERM_TO_IDX:
-            counts[TERM_TO_IDX[a], TERM_TO_IDX[b]] += 1.0
 
 
 def normalize_rows(counts, eps=1e-9):
@@ -97,15 +113,15 @@ def normalize_rows(counts, eps=1e-9):
     return c / c.sum(axis=1, keepdims=True)
 
 
-def bigram_kl(cond_counts, p_true, eps=1e-9):
-    """Prev-marginal-weighted KL( P_cond(.|prev) || P_true(.|prev) )."""
+def ngram_kl(cond_counts, p_true, eps=1e-9):
+    """Context-marginal-weighted KL( P_cond(.|ctx) || P_true(.|ctx) ), any order."""
     total = cond_counts.sum()
     if total == 0:
         return float("nan")
     p_cond = normalize_rows(cond_counts, eps)
-    prev_marg = cond_counts.sum(axis=1) / total
-    kl_per_prev = (p_cond * (np.log(p_cond) - np.log(p_true))).sum(axis=1)
-    return float((prev_marg * kl_per_prev).sum())
+    ctx_marg = cond_counts.sum(axis=1) / total
+    kl_per_ctx = (p_cond * (np.log(p_cond) - np.log(p_true))).sum(axis=1)
+    return float((ctx_marg * kl_per_ctx).sum())
 
 
 # ── One condition for one trial ─────────────────────────────────────────────────
@@ -189,11 +205,13 @@ def run_experiment(checkpoint_path, cfg_path, trials_path, corpus_path=None,
     prefix_len = trials_payload["meta"]["prefix_len"]
     if corpus_path is None:
         corpus_path = trials_payload["meta"]["corpus_path"]
-        # Trials may have been frozen before the folder moved; if the stored
-        # corpus path is gone, fall back to the same filename in the current
-        # cache dir.
+        # Trials may have been frozen on another machine / before the folder
+        # moved, so the stored path can be stale (even a Windows path on Linux).
+        # Fall back to the same filename in the current cache dir. Split on both
+        # separators so a 'C:\...\corpus.pt' string is parsed correctly on Linux.
         if not os.path.exists(corpus_path):
-            fallback = os.path.join(CACHE_DIR, os.path.basename(corpus_path))
+            basename = corpus_path.replace("\\", "/").rsplit("/", 1)[-1]
+            fallback = os.path.join(CACHE_DIR, basename)
             if os.path.exists(fallback):
                 corpus_path = fallback
     corpus_payload = torch.load(corpus_path, weights_only=False)
@@ -203,7 +221,7 @@ def run_experiment(checkpoint_path, cfg_path, trials_path, corpus_path=None,
         trials = trials[:limit]
 
     cfg = load_cfg(cfg_path)
-    p_true = true_bigram_distribution(corpus_payload)
+    p_true = {nn: true_ngram_distribution(corpus_payload, nn) for nn in ORDERS}
 
     # Model.
     model = GPT2Rotary(vocab_size=5, n_layer=12, n_head=12, n_embd=768)
@@ -219,7 +237,8 @@ def run_experiment(checkpoint_path, cfg_path, trials_path, corpus_path=None,
 
     # Accumulators.
     valid_counts = {c: 0 for c in conditions}
-    bigram_counts = {c: np.zeros((3, 3), dtype=np.float64) for c in conditions}
+    ngram_counts = {c: {nn: np.zeros((3 ** (nn - 1), 3), dtype=np.float64)
+                        for nn in ORDERS} for c in conditions}
     n = len(trials)
 
     for ti, trial in enumerate(tqdm(trials, desc=f"NT{level} patch @ layer {layer}")):
@@ -228,31 +247,46 @@ def run_experiment(checkpoint_path, cfg_path, trials_path, corpus_path=None,
                         prefix_len, device, temperature, seed + ti, noise_gen)
         for c in conditions:
             valid_counts[c] += int(res[c]["valid"])
-            add_bigrams(bigram_counts[c], res[c]["content"])
+            for nn in ORDERS:
+                add_ngrams(ngram_counts[c][nn], res[c]["content"], nn)
 
     # ── Report ──
     cyk = {c: valid_counts[c] / n for c in conditions}
-    kl = {c: bigram_kl(bigram_counts[c], p_true) for c in conditions}
+    kl = {c: {nn: ngram_kl(ngram_counts[c][nn], p_true[nn]) for nn in ORDERS}
+          for c in conditions}
     base = cyk.get("clean", float("nan"))
-    base_kl = kl.get("clean", float("nan"))
+    base_kl = kl.get("clean", {nn: float("nan") for nn in ORDERS})
 
-    print(f"\n{'='*68}")
+    names = {2: "2-gram", 3: "3-gram", 4: "4-gram"}
+
+    print(f"\n{'='*78}")
     print(f"  Activation patching @ NT{level}, layer {layer}   (N={n} trials)")
-    print(f"{'='*68}")
-    print(f"  {'condition':<18}{'CYK valid':>11}{'CYK drop':>11}"
-          f"{'bigram KL':>12}{'KL drift':>11}")
-    print("  " + "-" * 64)
+    print(f"{'='*78}")
+
+    # Absolute table: CYK validity + n-gram KL per order.
+    print(f"  {'condition':<18}{'CYK valid':>11}{'CYK drop':>10}"
+          + "".join(f"{names[nn]:>10}" for nn in ORDERS))
+    print("  " + "-" * 76)
     for c in conditions:
         drop = base - cyk[c]
-        drift = kl[c] - base_kl
-        print(f"  {c:<18}{cyk[c]:>10.1%}{drop:>11.1%}{kl[c]:>12.4f}{drift:>+11.4f}")
-    print(f"{'='*68}")
-    print("  Expected: donor -> large CYK drop, ~0 KL drift (structure breaks,")
-    print("            surface holds). noise_boundary -> CYK drop AND KL rises.")
+        kls = "".join(f"{kl[c][nn]:>10.4f}" for nn in ORDERS)
+        print(f"  {c:<18}{cyk[c]:>10.1%}{drop:>10.1%}{kls}")
+
+    # Drift table: KL(cond) - KL(clean) -- the structure-order gradient.
+    print(f"\n  KL drift vs clean  (for `donor`, should GROW with n-gram order):")
+    print(f"  {'condition':<18}" + "".join(f"{names[nn]:>10}" for nn in ORDERS))
+    print("  " + "-" * 48)
+    for c in conditions:
+        drift = "".join(f"{kl[c][nn] - base_kl[nn]:>+10.4f}" for nn in ORDERS)
+        print(f"  {c:<18}{drift}")
+
+    print(f"{'='*78}")
+    print("  Expected: donor -> large CYK drop; KL drift small but GROWING with")
+    print("            order (local surface intact, longer-range structure breaks).")
     print("            noise_nonboundary -> little CYK drop (boundaries suffice).")
 
-    return {"cyk": cyk, "bigram_kl": kl, "n": n,
-            "valid_counts": valid_counts, "bigram_counts": bigram_counts}
+    return {"cyk": cyk, "ngram_kl": kl, "orders": ORDERS, "n": n,
+            "valid_counts": valid_counts, "ngram_counts": ngram_counts}
 
 
 if __name__ == "__main__":

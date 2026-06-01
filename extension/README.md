@@ -13,7 +13,7 @@ just a map of the files and how to run them.
 Swap a clean string's NT5-boundary hidden states for a donor string's (same
 positions, *different* NT identity). If the model **uses** the encoding, the
 completion stops being grammatical (CYK-invalid) while its local surface
-statistics (bigram distribution) stay roughly unchanged — a structure-vs-surface
+statistics (low-order n-grams) stay roughly unchanged — a structure-vs-surface
 *dissociation* that a generic perturbation would not produce.
 
 ## Pipeline (run in this order)
@@ -24,7 +24,7 @@ statistics (bigram distribution) stay roughly unchanged — a structure-vs-surfa
 | 2 | `build_corpus.py` | Sample M valid CFG strings once, store full parse annotations, and **measure the donor acceptance rate**. | grammar only |
 | 3 | `build_trials.py` | Match N `(clean, donor)` pairs from the corpus by pure indexing; freeze them to disk. | corpus (step 2) |
 | – | `evaluation/probing_all.py` | Per-layer NT5 decodability scan — **required** to pick the patch layer ℓ\* (the last layer is causally inert; see Conventions). | GPU + checkpoint |
-| 4 | `patch_experiment.py` | For each trial, generate under 4 conditions and score CYK validity (structural) + bigram KL (surface). Pass `--layer ℓ*`. | trials (step 3) **and the GPT checkpoint** |
+| 4 | `patch_experiment.py` | For each trial, generate under 4 conditions and score CYK validity (structural) + n-gram KL, orders 2–4 (surface→structure). Pass `--layer ℓ*`. | trials (step 3) **and the GPT checkpoint** |
 
 Outputs land in `extension/cache/`:
 - `corpus_cfg3b.pt` — the M sampled strings + annotations.
@@ -52,12 +52,19 @@ python extension/patch_experiment.py --checkpoint gpt_checkpoint_step_6500.pt --
 | Condition | Injection | Expected | Role |
 |---|---|---|---|
 | `clean` | none | baseline CYK < 100% (undertrained model) | reference |
-| `donor` | donor's hidden states @ NT5 boundaries | **CYK drops, bigram KL flat** | the causal test |
-| `noise_boundary` | Gaussian noise @ same positions | CYK drops **and** bigram KL rises | specificity control |
+| `donor` | donor's hidden states @ NT5 boundaries | **CYK drops a lot; n-gram KL drift grows with order** | the causal test |
+| `noise_boundary` | Gaussian noise @ same positions | CYK drops, but **less** than `donor` | specificity control |
 | `noise_nonboundary` | noise @ same # of non-boundary positions | CYK ~unchanged | sufficiency control |
 
-The headline result is the contrast between `donor` (structure-only collapse)
-and `noise_boundary` (collapse of both) — that gap is the causal evidence.
+The headline result is the **structural** ordering
+`donor ≫ noise_boundary ≫ noise_nonboundary` on CYK drop: a *targeted* NT5
+swap breaks grammar more than equal-magnitude noise at the same positions
+(specificity), and boundary noise breaks more than non-boundary noise
+(sufficiency). The surface side is a **gradient**, not a single number — the
+model has so perfectly learned local statistics that the 2-gram KL barely
+moves under any condition, so we report orders 2–4: as the n-gram window grows
+to span constituents (NT6 ~3 terminals, NT5 ~4–9), the `donor` KL drift should
+grow, handing off to the global CYK metric. "Locally fine, globally broken."
 
 ## Key conventions (easy to trip on)
 
