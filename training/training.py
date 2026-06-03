@@ -109,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_weights", default=None,
                         help="Path to .pt weights file to resume training from (optional)")
     parser.add_argument("--n_iters", type=int, default=6_500, help="Number of training iterations")
-    parser.add_argument("--output", default="my_model", help="Base name for checkpoint and final weights files")
+    parser.add_argument("--output", default=None, help="Optional base name for the final weights file (default: {model}_{cfg}.pt)")
     parser.add_argument("--cfg", required=True, choices=available_grammars,
                         help=f"Grammar to use. Available: {', '.join(sorted(available_grammars))}")
     args = parser.parse_args()
@@ -137,6 +137,6 @@ if __name__ == "__main__":
         device=device,
     )
 
-    final_path = f"{args.output}_weights.pt"
+    final_path = f"{args.output}.pt" if args.output else f"{args.model}_{args.cfg}.pt"
     torch.save(model.state_dict(), final_path)
     print(f"Final model saved to {final_path}")

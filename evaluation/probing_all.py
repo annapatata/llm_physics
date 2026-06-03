@@ -390,8 +390,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Per-layer × per-level diagonal probe scan (Result 5 over depth)"
     )
-    parser.add_argument("--checkpoint", required=True,
-                        help="Path to GPT_rot .pt checkpoint")
+    parser.add_argument("--model_weights", required=True,
+                        help="Path to .pt model weights")
     parser.add_argument("--cfg", default="cfg/grammars/cfg3b.txt",
                         help="Path to grammar file (relative to project root)")
     parser.add_argument("--levels", nargs="+", type=int, default=[2, 3, 4, 5, 6])
@@ -409,7 +409,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_per_layer_scan(
-        gpt_checkpoint_path=args.checkpoint,
+        gpt_checkpoint_path=args.model_weights,
         cfg_path=os.path.join(project_root, args.cfg),
         levels=tuple(args.levels),
         n_probe_iters=args.n_iters,

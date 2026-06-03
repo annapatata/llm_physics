@@ -372,6 +372,7 @@ def run_probing_experiment(
     n_eval_samples: int = 500,
     device: str = 'cuda',
     random_gpt: bool = False,
+    diagonal_delta: int = 0,
 ) -> List[ProbeResult]:
     """
     Full probing experiment for Results 4 and 5.
@@ -424,7 +425,7 @@ def run_probing_experiment(
         diag_probe = train_probe(
             diag_probe, model, cfg, level, label_map,
             n_iters=n_probe_iters, batch_size=60,
-            device=device, diagonal_delta=0,
+            device=device, diagonal_delta=diagonal_delta,
         )
 
         result = evaluate_probe(
@@ -480,6 +481,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_eval", type=int, default=500,
                         help="Number of fresh strings for evaluation")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--delta", type=int, default=0,
+                        help="Diagonal probe window: 0=single token, 1=tridiagonal, etc.")
     parser.add_argument("--random_gpt", action="store_true",
                         help="Use random GPT weights (GPT_rand control)")
     args = parser.parse_args()
@@ -493,4 +496,5 @@ if __name__ == "__main__":
         n_eval_samples=args.n_eval,
         device=args.device,
         random_gpt=args.random_gpt,
+        diagonal_delta=args.delta,
     )
