@@ -310,8 +310,10 @@ def evaluate_probe(
     Result 4: full_probe with full attention → accuracy at every position.
     Result 5: diag_probe with diagonal mask → accuracy at boundary positions only.
     """
-    full_probe.eval()
-    diag_probe.eval()
+    if full_probe is not None:
+        full_probe.eval()
+    if diag_probe is not None:
+        diag_probe.eval()
     gpt_model.eval()
 
     full_correct = full_total = 0
@@ -338,19 +340,21 @@ def evaluate_probe(
             )
 
             # ── Result 4: full probe, all positions ──────────────────────────
-            logits_full = full_probe(hidden_tokens).squeeze(0)   # (T, n_classes)
-            preds_full = logits_full.argmax(dim=-1)
-            full_correct += (preds_full == labels).sum().item()
-            full_total += T
+            if full_probe is not None:
+                logits_full = full_probe(hidden_tokens).squeeze(0)
+                preds_full = logits_full.argmax(dim=-1)
+                full_correct += (preds_full == labels).sum().item()
+                full_total += T
 
             # ── Result 5: diagonal probe, boundary positions only ────────────
-            diag_mask = MultiHeadLinearProbe.make_diagonal_mask(T, delta=0, device=device)
-            logits_diag = diag_probe(hidden_tokens, attn_mask=diag_mask).squeeze(0)
-            preds_diag = logits_diag.argmax(dim=-1)
+            if diag_probe is not None:
+                diag_mask = MultiHeadLinearProbe.make_diagonal_mask(T, delta=0, device=device)
+                logits_diag = diag_probe(hidden_tokens, attn_mask=diag_mask).squeeze(0)
+                preds_diag = logits_diag.argmax(dim=-1)
 
-            if is_boundary.any():
-                boundary_correct += (preds_diag[is_boundary] == labels[is_boundary]).sum().item()
-                boundary_total += is_boundary.sum().item()
+                if is_boundary.any():
+                    boundary_correct += (preds_diag[is_boundary] == labels[is_boundary]).sum().item()
+                    boundary_total += is_boundary.sum().item()
 
     return ProbeResult(
         level=level,
@@ -373,6 +377,8 @@ def run_probing_experiment(
     device: str = 'cuda',
     random_gpt: bool = False,
     diagonal_delta: int = 0,
+    run_full: bool = True,
+    run_diagonal: bool = True,
 ) -> List[ProbeResult]:
     """
     Full probing experiment for Results 4 and 5.
@@ -408,25 +414,27 @@ def run_probing_experiment(
         print(f"  NT symbols → class indices: {label_map}")
         n_classes = len(label_map)
 
-        # Train full probe (Result 4)
-        full_probe = MultiHeadLinearProbe(
-            n_embd=768, n_heads=16, d_pos=1024, n_classes=n_classes
-        ).to(device)
-        full_probe = train_probe(
-            full_probe, model, cfg, level, label_map,
-            n_iters=n_probe_iters, batch_size=60,
-            device=device, diagonal_delta=None,
-        )
+        full_probe = None
+        if run_full:
+            full_probe = MultiHeadLinearProbe(
+                n_embd=768, n_heads=16, d_pos=1024, n_classes=n_classes
+            ).to(device)
+            full_probe = train_probe(
+                full_probe, model, cfg, level, label_map,
+                n_iters=n_probe_iters, batch_size=60,
+                device=device, diagonal_delta=None,
+            )
 
-        # Train diagonal probe (Result 5)
-        diag_probe = MultiHeadLinearProbe(
-            n_embd=768, n_heads=16, d_pos=1024, n_classes=n_classes
-        ).to(device)
-        diag_probe = train_probe(
-            diag_probe, model, cfg, level, label_map,
-            n_iters=n_probe_iters, batch_size=60,
-            device=device, diagonal_delta=diagonal_delta,
-        )
+        diag_probe = None
+        if run_diagonal:
+            diag_probe = MultiHeadLinearProbe(
+                n_embd=768, n_heads=16, d_pos=1024, n_classes=n_classes
+            ).to(device)
+            diag_probe = train_probe(
+                diag_probe, model, cfg, level, label_map,
+                n_iters=n_probe_iters, batch_size=60,
+                device=device, diagonal_delta=diagonal_delta,
+            )
 
         result = evaluate_probe(
             full_probe, diag_probe, model, cfg, level, label_map,
@@ -483,6 +491,10 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--delta", type=int, default=0,
                         help="Diagonal probe window: 0=single token, 1=tridiagonal, etc.")
+    parser.add_argument("--full_only", action="store_true",
+                        help="Run only the full probe (Result 4), skip diagonal")
+    parser.add_argument("--diagonal_only", action="store_true",
+                        help="Run only the diagonal probe (Result 5), skip full")
     parser.add_argument("--random_gpt", action="store_true",
                         help="Use random GPT weights (GPT_rand control)")
     args = parser.parse_args()
@@ -497,4 +509,6 @@ if __name__ == "__main__":
         device=args.device,
         random_gpt=args.random_gpt,
         diagonal_delta=args.delta,
+        run_full=not args.diagonal_only,
+        run_diagonal=not args.full_only,
     )
