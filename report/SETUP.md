@@ -1,35 +1,38 @@
-# Report Setup
+# Building the Report
 
-## Dependencies
+## Prerequisites
 
-### 1. LaTeX distribution
+Install [MiKTeX](https://miktex.org/download) (Windows). It will auto-install any missing LaTeX packages on first compile.
 
-Install [MiKTeX](https://miktex.org/download) (Windows). During first compile it will auto-install any missing packages.
-
-Verify it is installed:
-```bash
+Verify your installation:
+```powershell
 pdflatex --version
 bibtex --version
 ```
 
-### 2. ICML 2024 style file
+---
 
-Run the fetch script to download `icml2024.sty`:
-```bash
-bash report/fetch_template.sh
+## Compile (PowerShell)
+
+```powershell
+cd report
+pdflatex -interaction=nonstopmode report.tex
+bibtex report
+pdflatex -interaction=nonstopmode report.tex
+pdflatex -interaction=nonstopmode report.tex
 ```
 
-This downloads `icml2024.sty` directly from the ICML website and places it next to `report.tex`.
+Output: `report/report.pdf`
+
+You need to run `pdflatex` three times — the first pass builds the structure, `bibtex` resolves citations, and the final two passes fill in cross-references and the bibliography.
 
 ---
 
-## Compiling
+## Open the PDF
 
-```bash
-bash report/compile.sh
+```powershell
+start report\report.pdf
 ```
-
-This runs `pdflatex → bibtex → pdflatex → pdflatex` and produces `report/report.pdf`.
 
 ---
 
@@ -39,5 +42,4 @@ This runs `pdflatex → bibtex → pdflatex → pdflatex` and produces `report/r
 |------|---------|
 | `report.tex` | Main LaTeX source |
 | `references.bib` | BibTeX bibliography |
-| `fetch_template.sh` | Downloads `icml2024.sty` |
-| `compile.sh` | Compiles the PDF |
+| `compile.sh` | Compile script for Git Bash |
