@@ -2,17 +2,36 @@
 
 ## Prerequisites
 
-Install [MiKTeX](https://miktex.org/download) (Windows). It will auto-install any missing LaTeX packages on first compile.
+You need a LaTeX distribution with `pdflatex` and `bibtex`. No extra style files are required.
 
-Verify your installation:
+### Windows
+
+Install [MiKTeX](https://miktex.org/download). It auto-installs missing packages on first compile.
+
+Verify:
 ```powershell
+pdflatex --version
+bibtex --version
+```
+
+### Linux
+
+Install TeX Live:
+```bash
+sudo apt install texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+```
+
+Verify:
+```bash
 pdflatex --version
 bibtex --version
 ```
 
 ---
 
-## Compile (PowerShell)
+## Compile
+
+### Windows (PowerShell)
 
 ```powershell
 cd report
@@ -22,16 +41,26 @@ pdflatex -interaction=nonstopmode report.tex
 pdflatex -interaction=nonstopmode report.tex
 ```
 
-Output: `report/report.pdf`
+### Linux or Windows (Git Bash)
 
-You need to run `pdflatex` three times — the first pass builds the structure, `bibtex` resolves citations, and the final two passes fill in cross-references and the bibliography.
+```bash
+bash report/compile.sh
+```
+
+Output: `report/report.pdf`
 
 ---
 
 ## Open the PDF
 
+**Windows:**
 ```powershell
 start report\report.pdf
+```
+
+**Linux:**
+```bash
+xdg-open report/report.pdf
 ```
 
 ---
@@ -42,4 +71,4 @@ start report\report.pdf
 |------|---------|
 | `report.tex` | Main LaTeX source |
 | `references.bib` | BibTeX bibliography |
-| `compile.sh` | Compile script for Git Bash |
+| `compile.sh` | Compile script (Linux / Git Bash) |
