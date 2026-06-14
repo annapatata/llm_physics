@@ -190,23 +190,78 @@ Measuring $B$ as a function of ancestor distance $r$ between same-level boundary
 \section{Extension: Present vs.\ Used Information}
 \label{sec:extension}
 
-\subsection{Motivation}
+\subsection{Motivation and Target Level}
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+The probing experiments (R4--R5) establish that NT ancestry information is \emph{present} in the model's hidden states. Our extension asks a sharper question: is this information also \emph{used} by the model when generating subsequent tokens? We investigate this via activation patching—surgically replacing the hidden state at specific positions and measuring the effect on the model's output.
 
-\subsection{Hypothesis}
+We focus on level NT5 as the target. NT5 sits close enough to the terminal layer that corrupting a single NT5 constituent affects a meaningful but bounded portion of the output string: a typical NT5 subtree spans a few tokens, so replacing its hidden-state summary visibly disrupts the local output without changing the global structure of the entire sequence. Choosing a higher level (e.g.\ NT2) would corrupt so much of the parse tree that the entire output would collapse; choosing NT6 (one step above terminals) would affect only one or two tokens, making any signal hard to detect.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.
+\subsection{Finding the Encoding Layer}
 
-\subsection{Method: Activation Patching}
+Before patching, we need to identify the earliest layer at which NT5 information is fully encoded. We train a diagonal linear probe per layer (3{,}000 iterations each, evaluated on 500 fresh strings) and record boundary-position accuracy at each layer. Results are shown in Table~\ref{tab:layer_probing}.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit. Ut labore et dolore magnam aliquam quaerat voluptatem.
+\begin{table}[h]
+\centering
+\caption{Diagonal probe accuracy at NT5 boundary positions, per layer.}
+\label{tab:layer_probing}
+\small
+\begin{tabular}{cc}
+\toprule
+\textbf{Layer} & \textbf{NT5 accuracy} \\
+\midrule
+0  & 38.1\% \\
+1  & 26.3\% \\
+2  & 51.1\% \\
+3  & 85.2\% \\
+4  & 75.0\% \\
+5  & \textbf{98.6\%} \\
+6  & 98.3\% \\
+7  & 99.7\% \\
+8  & 99.9\% \\
+9  & 99.8\% \\
+10 & 99.5\% \\
+11 & 99.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur?
+NT5 information first reaches high accuracy at layer 5 (98.6\%), with all subsequent layers above 98\%. We therefore select \textbf{layer 5} as the intervention point: it is the earliest layer where the NT5 identity is reliably encoded, meaning any downstream layers that use this information must read it from here.
 
-\subsection{Expected Results and Limitations}
+\subsection{Activation Patching Experiment}
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+At inference time, we run the model on a \emph{base} string and replace the hidden states at NT5 boundary positions at layer 5 with states from one of three alternative sources:
+
+\begin{description}[leftmargin=*, itemsep=0pt]
+  \item[Donor.] Hidden states from a different string whose NT5 constituent has a different identity. This tests whether swapping the NT5 label at the boundary causally alters the output structure.
+  \item[Noise (boundary).] Gaussian noise injected at NT5 boundary positions only.
+  \item[Noise (non-boundary).] Gaussian noise injected at non-boundary positions only. This is the control: if structure is stored at boundaries, corrupting non-boundaries should have little effect.
+\end{description}
+
+We measure CYK validity of the generated output and $n$-gram KL drift relative to the clean baseline across 500 trials. Results are shown in Table~\ref{tab:patching}.
+
+\begin{table}[h]
+\centering
+\caption{Activation patching results at NT5, layer 5 ($N{=}500$ trials).}
+\label{tab:patching}
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Condition} & \textbf{CYK valid} & \textbf{CYK drop} \\
+\midrule
+Clean              & 98.8\% & ---    \\
+Donor              & 41.2\% & 57.6\% \\
+Noise (boundary)   & 69.8\% & 29.0\% \\
+Noise (non-boundary) & 94.0\% & 4.8\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Discussion}
+
+The donor condition produces a 57.6\% drop in CYK validity, confirming that the NT5 identity stored at boundary positions is causally used by the model: replacing it with a structurally incompatible state causes the model to generate invalid strings at a high rate. The noise-at-boundary condition also causes a significant drop (29.0\%), further supporting that boundary hidden states carry load-bearing structural information.
+
+Crucially, noise injected at \emph{non-boundary} positions causes almost no disruption (4.8\% drop), closely matching the clean baseline of 98.8\%. This asymmetry between boundary and non-boundary interventions is a strong causal confirmation of the original paper's hypothesis: the model does not distribute structural information uniformly across all positions, but concentrates it at constituent boundaries, from which downstream layers read it to guide generation.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Discussion}
