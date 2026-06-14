@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 # Compiles report.tex to PDF using pdflatex + bibtex
+# Works on Linux (TeX Live) and Windows (MiKTeX via Git Bash)
 set -e
 
 cd "$(dirname "$0")"
-
-if [ ! -f "icml2024.sty" ]; then
-    echo "icml2024.sty not found. Run fetch_template.sh first."
-    exit 1
-fi
 
 echo "==> Pass 1: pdflatex"
 pdflatex -interaction=nonstopmode report.tex
@@ -21,4 +17,7 @@ pdflatex -interaction=nonstopmode report.tex
 echo "==> Pass 3: pdflatex"
 pdflatex -interaction=nonstopmode report.tex
 
-echo "==> Done. Output: report.pdf"
+echo "==> Cleaning build artefacts"
+rm -f report.aux report.bbl report.blg report.log report.out report.toc
+
+echo "==> Done. Output: report/report.pdf"
