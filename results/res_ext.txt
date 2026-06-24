@@ -1,0 +1,23 @@
+NT5 patch @ layer 5: 100%|██████████████████| 500/500 [2:06:19<00:00, 15.16s/it]
+
+==============================================================================
+  Activation patching @ NT5, layer 5   (N=500 trials)
+==============================================================================
+  condition           CYK valid  CYK drop    2-gram    3-gram    4-gram
+  ----------------------------------------------------------------------------
+  clean                  98.8%      0.0%    0.0000    0.0000    0.0001
+  donor                  41.2%     57.6%    0.0001    0.0001    0.0001
+  noise_boundary         69.8%     29.0%    0.0000    0.0000    0.0001
+  noise_nonboundary      94.0%      4.8%    0.0000    0.0013    0.0019
+
+  KL drift vs clean  (for `donor`, should GROW with n-gram order):
+  condition             2-gram    3-gram    4-gram
+  ------------------------------------------------
+  clean                +0.0000   +0.0000   +0.0000
+  donor                +0.0000   +0.0000   +0.0000
+  noise_boundary       +0.0000   +0.0000   +0.0000
+  noise_nonboundary    +0.0000   +0.0013   +0.0018
+==============================================================================
+  Expected: donor -> large CYK drop; KL drift small but GROWING with
+            order (local surface intact, longer-range structure breaks).
+            noise_nonboundary -> little CYK drop (boundaries suffice).

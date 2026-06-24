@@ -1,0 +1,6 @@
+==================================================
+  Result 3 — KL(P_true || P_model)
+  0.000350 nats/token   (200 strings, 54369 positions)
+==================================================
+  Paper target (GPT_rot, cfg3b): ~0.00009
+  Paper target (GPT_rot, cfg3f): ~0.00455
