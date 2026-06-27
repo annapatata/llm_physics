@@ -181,15 +181,15 @@ The diagonal probe (R5) consistently and substantially outperforms the full prob
 
 \subsection{Attention Analysis (Results 6--9)}
 
-\paragraph{Result 6 — Distance-based attention.}
+\paragraph{Result 6 — Distance-based attention}
 Averaging attention weights $\bar{A}_p$ over all pairs $(i,j)$ with $j-i=p$, across all layers and heads, we observe a strong recency bias. The distribution peaks at $p=1$ ($\bar{A}=0.0946$) and $p=2$ ($\bar{A}=0.0927$), decaying rapidly thereafter (e.g.\ $\bar{A}=0.0097$ at $p=15$). A uniform distribution over 100 positions would give $\bar{A}\approx0.01$, so the model attends roughly $9\times$ more to the immediately preceding token than baseline. This distance bias is subtracted to isolate structure-sensitive attention.
 
-\paragraph{Result 7 — Attention to NT-boundaries.}
+\paragraph{Result 7 — Attention to NT-boundaries}
 After removing the distance bias, the residual $B = A - \bar{A}$ is measured for key positions at offset $\delta$ from a constituent boundary. Table~\ref{tab:r7} shows a clear peak at $\delta=0$ across all levels: the model disproportionately attends to exact boundary positions. The effect is strongest at NT2 ($B=+0.0085$) where boundaries are rare and summarise large subtrees, decreasing toward NT6 ($B=+0.0019$) where boundaries are frequent and subtrees are small.
 
 \begin{table}[h]
 \centering
-\caption{Result 7 — Residual attention $B$ at offset $\delta$ from NT-boundary.}
+\caption{Result 7 — Residual attention $B$ at offset $\delta$ from NT-boundary}
 \label{tab:r7}
 \setlength{\tabcolsep}{4pt}
 \small
@@ -206,11 +206,45 @@ NT6 & $+.0006$ & $-.0016$ & $\mathbf{+.0019}$ & $-.0008$ & $-.0002$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{Result 8 — Boundary-to-boundary attention.}
-Restricting both query and key positions to NT-boundaries at the same level, mean residual $B$ is positive at all levels: NT2 $+0.0020$, NT3 $+0.0056$, NT4 $+0.0080$, NT5 $+0.0059$, NT6 $+0.0020$. The peak at NT4 coincides with the level where boundary density and subtree size are best balanced, providing the most informative pairings.
+\paragraph{Result 8 — Boundary-to-boundary attention}
+Restricting both query and key positions to NT-boundaries at the same level, the mean residual $B$ is positive throughout the hierarchy (Table~\ref{tab:r8}), peaking at NT4 where boundary density and subtree size are best balanced for informative pairings.
 
-\paragraph{Result 9 — Adjacent NT-end attention.}
-Measuring $B$ as a function of ancestor distance $r$ between same-level boundary positions, the signal is consistently maximised at $r=1$ and decreases with $r$. For example, at NT5: $r=1$: $+0.0315$, $r=2$: $+0.0211$, $r=3$: $+0.0038$. At NT2 the signal is near zero for $r \geq 2$ due to the small number of high-level constituents per string. This monotone decay is the signature of a DP-like recurrence: the model retrieves structural information primarily from the immediately preceding constituent boundary, mirroring CYK-style parsing.
+\begin{table}[h]
+\centering
+\caption{Result 8 — mean residual $B$ for same-level NT-boundary pairs}
+\label{tab:r8}
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lccccc}
+\toprule
+& NT2 & NT3 & NT4 & NT5 & NT6 \\
+\midrule
+mean $B$ & $+.0020$ & $+.0056$ & $\mathbf{+.0080}$ & $+.0059$ & $+.0020$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Result 9 — Adjacent NT-end attention}
+Among same-level boundary pairs, we bin $B$ by ancestor distance $r=p_\ell(j)-p_\ell(i)$ (the $r{=}0$ column is empty by construction, as a level-$\ell$ subtree has a single boundary). Table~\ref{tab:r9} shows the signal peaks sharply at $r=1$ at every level and decays outward, with the strongest residuals of the whole analysis at NT4--NT5 ($+0.0298$, $+0.0315$). Far-$r$ buckets are sparsely sampled and approach noise (occasional small negatives), and NT2 has too few high-level constituents to register beyond $r=1$. This monotone decay is the signature of a DP-like recurrence: the model retrieves structural information primarily from the immediately preceding same-level boundary, mirroring CYK-style parsing.
+
+\begin{table}[h]
+\centering
+\caption{Result 9 — residual $B$ by ancestor distance $r$ between same-level boundaries.}
+\label{tab:r9}
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+& $r{=}1$ & $r{=}2$ & $r{=}3$ & $r{=}4$ & $r{=}5$ \\
+\midrule
+NT2 & $+.0020$ & $.0000$  & $.0000$  & $.0000$  & $.0000$  \\
+NT3 & $+.0122$ & $+.0023$ & $+.0011$ & $-.0003$ & $.0000$  \\
+NT4 & $\mathbf{+.0298}$ & $+.0117$ & $+.0063$ & $+.0068$ & $+.0036$ \\
+NT5 & $\mathbf{+.0315}$ & $+.0211$ & $+.0038$ & $+.0054$ & $+.0052$ \\
+NT6 & $+.0204$ & $+.0139$ & $+.0022$ & $+.0020$ & $-.0008$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Extension: Present vs.\ Used Information}
