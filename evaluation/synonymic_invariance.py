@@ -1,27 +1,27 @@
 """
-Synonymic invariance  S_{k,ℓ}  (Extension A).
+Synonymic invariance  S_{k,l}  (Extension A).
 
 Imports the Random Hierarchy Model's central measurable
 (documentation/extension_A_synonymic_invariance.md) into our language-model
-transformer. For network layer k and swap level ℓ:
+transformer. For network layer k and swap level l:
 
-        ⟨ ‖ f_k(x) − f_k(P_ℓ x) ‖²  ⟩_{x, P_ℓ}
-  S_{k,ℓ} = ────────────────────────────────────────
+        ⟨ ‖ f_k(x) − f_k(P_l x) ‖²  ⟩_{x, P_l}
+  S_{k,l} = ────────────────────────────────────────
         ⟨ ‖ f_k(x) − f_k(y)     ‖²  ⟩_{x, y}
 
-  numerator   — how much layer k moves under a swap that *shouldn't* matter
+  numerator   -- how much layer k moves under a swap that *shouldn't* matter
                 (a synonym swap: same meaning, different wording).
-  denominator — the natural scale: how much it moves between two unrelated inputs.
+  denominator -- the natural scale: how much it moves between two unrelated inputs.
 
-  S ≈ 1  → layer still "hears the wording" (sensitive).
-  S ≈ 0  → layer "hears only the meaning"  (invariant).
+  S ~= 1  -> layer still "hears the wording" (sensitive).
+  S ~= 0  -> layer "hears only the meaning"  (invariant).
 
 Two readouts of f_k (see §5 of the doc):
   - boundary : f_k(x) = h_k at the swapped subtree's right-boundary position j
                (where R5 showed the subtree summary lives). Primary.
   - pooled   : f_k(x) = mean over all token positions. Secondary / sanity.
 
-The model is frozen; NO retraining and NO probe training are needed — this is
+The model is frozen; NO retraining and NO probe training are needed -- this is
 just forward passes with hooks on every block. Because numerator and denominator
 share the same layer k, any per-layer activation-scale factor cancels in the
 ratio, so no explicit normalisation is required.
@@ -44,6 +44,10 @@ import torch
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
+
+# Force UTF-8 output on Windows (avoids cp1252 encoding errors for Unicode chars)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from cfg.grammar import load_cfg, CFG
 from cfg.synonym_swap import synonym_swap, SwapResult
@@ -114,7 +118,7 @@ def extract_all_layers_at(
     return at_pos, pooled
 
 
-# ── Build (x, P_ℓ x) pairs for one level ─────────────────────────────────────────
+# ── Build (x, P_l x) pairs for one level ─────────────────────────────────────────
 
 def build_pairs(
     cfg: CFG,
@@ -127,7 +131,7 @@ def build_pairs(
     Sample `n_pairs` synonym swaps at `level`.
 
     Leads with length-matched swaps. If `allow_unmatched` and length-matched
-    swaps are impossible at this level (cfg3b ℓ=6: every NT6 symbol's two rules
+    swaps are impossible at this level (cfg3b l=6: every NT6 symbol's two rules
     differ in length), falls back to best-effort swaps that read each string's own
     boundary index. Reports how many of each kind were used.
     """
@@ -153,7 +157,7 @@ def build_pairs(
     return out
 
 
-# ── The S_{k,ℓ} computation for one level ────────────────────────────────────────
+# ── The S_{k,l} computation for one level ────────────────────────────────────────
 
 def _seq(string: List[int]) -> List[int]:
     """[BOS] + terminals, capped to the model context (512 incl. BOS)."""
@@ -168,7 +172,7 @@ def compute_S_for_level(
     seed: int = 0,
 ) -> Dict[str, np.ndarray]:
     """
-    Returns {'boundary': S[k], 'pooled': S[k]} — synonymic sensitivity per layer
+    Returns {'boundary': S[k], 'pooled': S[k]} -- synonymic sensitivity per layer
     (length n_layers+1, index 0 = embeddings).
     """
     # Boundary token position is j+1 (BOS offset); guard against the cap at 511.
@@ -181,11 +185,11 @@ def compute_S_for_level(
     base_at, base_pool = _extract_batched(model, base_seqs, base_pos, device, batch_size)
     swap_at, swap_pool = _extract_batched(model, swap_seqs, swap_pos, device, batch_size)
 
-    # Numerator: paired ‖f_k(x) − f_k(P_ℓ x)‖²  averaged over pairs, per layer.
+    # Numerator: paired ‖f_k(x) − f_k(P_l x)‖²  averaged over pairs, per layer.
     num_b = ((base_at - swap_at) ** 2).sum(dim=-1).mean(dim=1).numpy()
     num_p = ((base_pool - swap_pool) ** 2).sum(dim=-1).mean(dim=1).numpy()
 
-    # Denominator: ‖f_k(x) − f_k(y)‖² over UNRELATED base strings (x, y) — the
+    # Denominator: ‖f_k(x) − f_k(y)‖² over UNRELATED base strings (x, y) -- the
     # natural scale. Pair each x with a shuffled partner y (its own boundary pos).
     rng = np.random.default_rng(seed)
     perm = rng.permutation(len(pairs))
@@ -239,7 +243,7 @@ def run(
         model.load_state_dict(state)
         print(f"Loaded GPT weights from {checkpoint_path}")
     else:
-        print("GPT_rand: RANDOM weights (control). Expect a flat S ≈ 1 with no staircase.")
+        print("GPT_rand: RANDOM weights (control). Expect a flat S ~= 1 with no staircase.")
     model.eval().to(device)
     for p in model.parameters():
         p.requires_grad_(False)
@@ -248,7 +252,7 @@ def run(
     results: Dict[int, Dict[str, np.ndarray]] = {}
 
     for level in levels:
-        print(f"\n{'='*60}\n  Swap level ℓ = {level} (NT{level})\n{'='*60}")
+        print(f"\n{'='*60}\n  Swap level l = {level} (NT{level})\n{'='*60}")
         pairs = build_pairs(cfg, level, n_pairs)
         if not pairs:
             print(f"  no eligible pairs at level {level}; skipping.")
@@ -257,7 +261,7 @@ def run(
             model, pairs, device, batch_size=batch_size, seed=seed
         )
         s = results[level]["boundary"]
-        print("  S_{k,ℓ} (boundary) by layer k = 0..%d:" % n_layers)
+        print("  S_{k,l} (boundary) by layer k = 0..%d:" % n_layers)
         print("   " + "  ".join(f"{v:.2f}" for v in s))
 
     _report_and_save(results, levels, n_layers, out_dir, random_gpt)
@@ -283,21 +287,21 @@ def _report_and_save(results, levels, n_layers, out_dir, random_gpt):
     npz_path = os.path.join(out_dir, f"synonymic_invariance_{tag}.npz")
     np.savez(npz_path, S_boundary=Sb, S_pooled=Sp,
              layers=np.arange(K), levels=np.array(used))
-    print(f"\nSaved raw arrays → {npz_path}")
+    print(f"\nSaved raw arrays -> {npz_path}")
 
     # Plain-text table (always works, no matplotlib needed).
     txt_path = os.path.join(out_dir, f"synonymic_invariance_{tag}.txt")
-    with open(txt_path, "w") as f:
-        f.write(f"Synonymic sensitivity S_{{k,ℓ}}  ({tag} GPT)  — boundary readout\n")
-        f.write("rows = layer k (0 = embeddings), cols = swap level ℓ\n\n")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(f"Synonymic sensitivity S_{{k,l}}  ({tag} GPT)  -- boundary readout\n")
+        f.write("rows = layer k (0 = embeddings), cols = swap level l\n\n")
         header = "layer " + "".join(f"  NT{l:>2}" for l in used)
         f.write(header + "\n")
         for k in range(K):
             f.write(f"{k:>5} " + "".join(f"  {Sb[k, j]:.2f}" for j in range(len(used))) + "\n")
         f.write("\n(lower = more invariant. Expect S to drop with depth, later for "
-                "smaller ℓ — the k≈ℓ+1 staircase.)\n")
-    print(f"Saved table       → {txt_path}")
-    print(f"\n{open(txt_path).read()}")
+                "smaller l -- the k~=l+1 staircase.)\n")
+    print(f"Saved table       -> {txt_path}")
+    print(f"\n{open(txt_path, encoding='utf-8').read()}")
 
     _maybe_plot(Sb, Sp, used, K, out_dir, tag)
 
@@ -308,7 +312,7 @@ def _maybe_plot(Sb, Sp, used, K, out_dir, tag):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        print("matplotlib not installed — skipping figures (raw .npz/.txt saved).")
+        print("matplotlib not installed -- skipping figures (raw .npz/.txt saved).")
         return
 
     # Heatmap: layer × level.
@@ -317,14 +321,14 @@ def _maybe_plot(Sb, Sp, used, K, out_dir, tag):
     ax.set_xticks(range(len(used)))
     ax.set_xticklabels([f"NT{l}" for l in used])
     ax.set_yticks(range(K))
-    ax.set_xlabel("swap level ℓ")
+    ax.set_xlabel("swap level l")
     ax.set_ylabel("transformer layer k  (0 = embeddings)")
-    ax.set_title(f"Synonymic sensitivity $S_{{k,\\ell}}$ — boundary ({tag})")
+    ax.set_title(f"Synonymic sensitivity $S_{{k,\\ell}}$ -- boundary ({tag})")
     fig.colorbar(im, ax=ax, label="S (0 = invariant, 1 = sensitive)")
     fig.tight_layout()
     hm = os.path.join(out_dir, f"synonymic_invariance_heatmap_{tag}.png")
     fig.savefig(hm, dpi=150)
-    print(f"Saved heatmap     → {hm}")
+    print(f"Saved heatmap     -> {hm}")
 
     # Per-level curves: S vs depth.
     fig2, ax2 = plt.subplots(figsize=(7, 4.5))
@@ -339,20 +343,20 @@ def _maybe_plot(Sb, Sp, used, K, out_dir, tag):
     fig2.tight_layout()
     cv = os.path.join(out_dir, f"synonymic_invariance_curves_{tag}.png")
     fig2.savefig(cv, dpi=150)
-    print(f"Saved curves      → {cv}")
+    print(f"Saved curves      -> {cv}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Synonymic invariance S_{k,ℓ} (Extension A)")
+    parser = argparse.ArgumentParser(description="Synonymic invariance S_{k,l} (Extension A)")
     parser.add_argument("--checkpoint", default="gpt_checkpoint_step_6500.pt")
     parser.add_argument("--cfg", default="cfg/grammars/cfg3b.txt")
     parser.add_argument("--levels", nargs="+", type=int, default=[2, 3, 4, 5, 6])
     parser.add_argument("--n_pairs", type=int, default=1000,
-                        help="length-matched (x, P_ℓ x) pairs per level")
+                        help="length-matched (x, P_l x) pairs per level")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--random_gpt", action="store_true",
-                        help="random-weight control (expect flat S≈1, no staircase)")
+                        help="random-weight control (expect flat S~=1, no staircase)")
     parser.add_argument("--out_dir", default="results")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
