@@ -335,6 +335,59 @@ Noise injected at \emph{non-boundary} positions causes almost no structural disr
 The $n$-gram KL columns test whether these interventions break \emph{structure} specifically or simply degrade the output. Under the donor patch, the model's bigram texture stays at the clean baseline ($0.0001$ vs.\ $0.0000$) even as CYK validity collapses: the model keeps emitting locally well-formed token transitions while failing to close the global parse. This structure-vs-surface dissociation is what makes the result a \emph{use} test rather than ``we perturbed the model and it got worse.'' We caution, however, that the surface axis is weakly resolved here: all $n$-gram KL values lie within $0.002$ of zero, so there is little dynamic range on these short continuations. We had expected the donor's KL to climb with $n$-gram order (local texture intact, longer-range structure breaking); instead it stays flat across orders, and the only appreciable movement is in the non-boundary noise condition at orders 3--4 ($0.0013$ and $0.0019$). We do not over-interpret this small, prediction-contrary drift; cleanly resolving the surface axis would require longer continuations and a larger sample.
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{Extension: Discarded Information --- Synonymic Invariance}
+\label{sec:synonymic}
+
+\subsection{Motivation}
+
+Probing (R4--R5) shows that parse-tree information is \emph{present} in the hidden states; our activation-patching extension (Section~\ref{sec:extension}) shows that the NT5-boundary encoding is \emph{used}. A third, complementary question is what the model \emph{discards}: a good hierarchical representation should keep a constituent's identity while throwing away the irrelevant detail of \emph{how} that constituent happened to be built. The Random Hierarchy Model \citep{cagnetta2024rhm}, a layered random CFG closely analogous to ours, makes this precise through \emph{synonymic invariance}: each non-terminal can be expanded by several interchangeable rules (``synonyms''), and a network that has learned the task becomes progressively insensitive, with depth, to swapping one synonym for another.
+
+We import this measurable into our language-model transformer. In \texttt{cfg3b} the alternative right-hand sides of a symbol are its synonyms (e.g.\ the root has the two rules $21\,20$, $20\,19$): different terminal yields, identical parent label. Let $f_k(x)$ be the hidden state at network layer $k$ (with $k{=}0$ the token embeddings) read at a chosen position, and let $P_\ell x$ denote $x$ with one level-$\ell$ subtree rebuilt from a different synonym of the same parent. We measure synonymic sensitivity
+\[
+S_{k,\ell} \;=\; \frac{\big\langle\, \lVert f_k(x) - f_k(P_\ell x)\rVert^2 \,\big\rangle}{\big\langle\, \lVert f_k(x) - f_k(y)\rVert^2 \,\big\rangle},
+\]
+the squared representational movement caused by a synonym swap (numerator), normalised by the movement between two unrelated strings (denominator). $S\approx 1$ means the layer still ``hears the wording''; $S\approx 0$ means it has collapsed all synonyms to a single representation and ``hears only the meaning.'' Because numerator and denominator share layer $k$, any per-layer activation scale cancels and no explicit normalisation is needed. The experiment is pure forward-pass analysis on the frozen checkpoint---no retraining and no probe training.
+
+\subsection{Method}
+
+We read $f_k$ at the swapped subtree's right boundary---the position R5 identified as the constituent's ``summary slot''---so the measurement asks directly whether that summary retains the synonym identity. This requires the swap to be \emph{length-matched}: because \texttt{cfg3b} rules have length 2 or 3, a different synonym can change the subtree's terminal length, shifting every later position and moving the boundary index, which would contaminate $S$ with a purely positional difference. We therefore rejection-sample the rebuilt subtree until its terminal length matches the original; the prefix up to the boundary is then identical except inside the swapped span, and because the transformer is causal any change in the boundary state is caused purely by the swap. We use $1{,}000$ swap pairs per level. Length matching is exact at NT4--NT5 ($1{,}000/1{,}000$ matched) and at NT3 ($998/1{,}000$); at NT2 the subtrees span most of the string and matches are rare ($448/1{,}000$, the rest best-effort); at NT6 the two rules of every symbol differ in length, so an exact match is impossible and all pairs are best-effort. NT2 and especially NT6 should therefore be read with caution.
+
+\begin{table}[h]
+\centering
+\caption{Synonymic sensitivity $S_{k,\ell}$ (boundary readout) per transformer layer $k$ and swap level ($k{=}0$ = token embeddings). Lower is more invariant; the bold cell in each column is the first layer at which $S<0.5$, tracing the depth-ordered staircase. NT2 (best-effort length matching) and NT6 (length matching impossible) are less reliable; see text.}
+\label{tab:synonymic}
+\setlength{\tabcolsep}{6pt}
+\small
+\begin{tabular}{crrrrr}
+\toprule
+\textbf{Layer }$k$ & \textbf{NT2} & \textbf{NT3} & \textbf{NT4} & \textbf{NT5} & \textbf{NT6} \\
+\midrule
+0  & 1.06 & 1.01 & 1.02 & 1.08 & 0.59 \\
+1  & 1.07 & 1.03 & 1.01 & 1.24 & \textbf{0.38} \\
+2  & 1.07 & 1.03 & 1.01 & 1.21 & 0.37 \\
+3  & 1.05 & 1.01 & 0.94 & 1.06 & 0.36 \\
+4  & 1.04 & 1.08 & 0.87 & 0.98 & 0.34 \\
+5  & 1.05 & 1.04 & 0.78 & 0.78 & 0.26 \\
+6  & 1.03 & 1.17 & 0.60 & \textbf{0.43} & 0.20 \\
+7  & 1.05 & 1.23 & \textbf{0.43} & 0.29 & 0.18 \\
+8  & 1.09 & 1.29 & 0.28 & 0.17 & 0.14 \\
+9  & 1.10 & 1.07 & 0.19 & 0.10 & 0.17 \\
+10 & 0.94 & 0.66 & 0.12 & 0.07 & 0.17 \\
+11 & 0.75 & \textbf{0.48} & 0.09 & 0.03 & 0.15 \\
+12 & \textbf{0.32} & 0.30 & 0.05 & 0.01 & 0.15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Results and Discussion}
+
+Two patterns are visible in Table~\ref{tab:synonymic}. First, \emph{within each level} synonymic sensitivity falls with depth, from $S\approx 1$ at the embeddings to near zero at the deepest layers for NT4 and NT5 ($0.05$ and $0.01$ at layer 12): the model does learn to discard synonym identity---exactly the RHM signature---and does so most cleanly at the levels our probes recovered best (NT5 was $99.9\%$ decodable at its boundary). Second, and more telling, the depth at which the collapse happens forms a \emph{staircase} ordered by constituent height. Taking the first layer at which $S$ falls below $0.5$, invariance to NT6 appears almost immediately (layer 1), to NT5 at layer 6, to NT4 at layer 7, to NT3 at layer 11, and to NT2 only at the final layer. Low-level constituents are abstracted in shallow layers; high-level constituents only deep---the analogue of the RHM's $k\approx\ell+1$ law.
+
+This staircase is the representational counterpart of the DP-like picture from the attention analysis. A dynamic program over the parse tree stores each subproblem by its $(\text{span},\text{label})$ key and discards the derivation that produced it; two synonymous derivations of the same constituent collapse to the same cell. Synonymic invariance is exactly that collapse measured in the hidden states---the boundary summary slot becomes a function of the constituent's identity and not of which rule built it---and the depth-ordered onset mirrors the bottom-up sweep of such a DP, with network depth tracking the height of the constituent currently being resolved. Where R6--R9 exhibited the DP \emph{recurrence} (boundaries reading adjacent boundaries), this exhibits the DP \emph{state abstraction}; together with probing (\emph{present}) and patching (\emph{used}), invariance completes the picture by showing what is \emph{discarded}.
+
+Two caveats temper the picture, both consistent with the rest of our results. The high-level rows do not fully collapse: NT2 and NT3 only begin to drop in the last two to three layers and bottom out near $0.3$ rather than $0$. This matches both the under-training seen elsewhere---NT2/NT3 were also the weakest probing levels ($53.3\%$/$59.1\%$)---and the RHM's own finding that invariance \emph{tracks learning}: at $6{,}500$ steps high-level constituency is the least-formed structure, so we observe a softened staircase rather than a sharp one. We also note a transient $S>1$ bump in early-to-middle layers (e.g.\ NT3 reaches $1.29$ at layer 8, NT5 $1.24$ at layer 1): a synonym swap briefly moves the representation slightly more than an unrelated string does, as the model elaborates local lexical content before later layers compress it away. Finally, the NT6 row is illustrative only---its swaps are all length-mismatched, and the anomalously low embedding-layer value ($0.59$ at $k{=}0$, against ${\approx}1.0$ for the length-matched levels) is the fingerprint of that positional contamination rather than genuine early invariance.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Discussion}
 \label{sec:discussion}
 
@@ -348,9 +401,10 @@ The high multinomial completion accuracy (98.00\%) is consistent with the relati
 
 We note first that further training is not a priority for this project. Our goal is to \emph{reproduce} the qualitative findings of \citet{allen-zhu2023physics} rather than to ship a converged model, and the structural phenomena we set out to verify---the DP-like boundary attention, the decodability of parse-tree symbols, and the causal use of NT5 boundaries---are already clearly present at 6{,}500 steps. Closing the residual KL gap to the paper's target would mostly confirm convergence we already expect; it would not change any of the conclusions above. We therefore see the more interesting directions in the extension itself, where two issues are worth pursuing.
 
-\paragraph{Cleaner isolation of NT5.} Our patch overwrites the full residual vector at a boundary, which unavoidably swaps the NT5 child's NT6 constituent on every trial (Section~\ref{sec:patch-exp}). Averaging over random donors removes the higher-level contamination but not this nested NT6 swap, so the donor effect mixes ``NT5 was changed'' with ``its NT6 child was changed.'' A cleaner intervention would overwrite only the probe's NT5 subspace direction---projecting the donor's contribution onto the NT5 readout and leaving the orthogonal complement (including the NT6 signal) untouched---so the swap targets NT5 alone.
+\paragraph{Cleaner isolation of NT5} Our patch overwrites the full residual vector at a boundary, which unavoidably swaps the NT5 child's NT6 constituent on every trial (Section~\ref{sec:patch-exp}). Averaging over random donors removes the higher-level contamination but not this nested NT6 swap, so the donor effect mixes ``NT5 was changed'' with ``its NT6 child was changed.'' A cleaner intervention would overwrite only the probe's NT5 subspace direction---projecting the donor's contribution onto the NT5 readout and leaving the orthogonal complement (including the NT6 signal) untouched---so the swap targets NT5 alone.
 
-\paragraph{Better-resolved local-structure measurement.} The $n$-gram KL columns were meant to separate a broken \emph{global} parse from intact \emph{local} surface texture, but the surface axis is weakly resolved on our short continuations: all values sit within $0.002$ of zero and the donor's KL does not grow with $n$-gram order as predicted (Table~\ref{tab:patching}). A sharper version of this experiment would use longer continuations and a larger trial count to give the surface metric real dynamic range, and could compare against the grammar's true $n$-gram distribution at several orders to trace exactly where, in $n$, the corruption transitions from local to structural.
+\paragraph{Better-resolved local-structure measurement} The $n$-gram KL columns were meant to separate a broken \emph{global} parse from intact \emph{local} surface texture, but the surface axis is weakly resolved on our short continuations: all values sit within $0.002$ of zero and the donor's KL does not grow with $n$-gram order as predicted (Table~\ref{tab:patching}). A sharper version of this experiment would use longer continuations and a larger trial count to give the surface metric real dynamic range, and could compare against the grammar's true $n$-gram distribution at several orders to trace exactly where, in $n$, the corruption transitions from local to structural.
+
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
